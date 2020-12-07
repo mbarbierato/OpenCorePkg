@@ -31,7 +31,6 @@
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
   UefiCpuPkg/UefiCpuPkg.dec
-  EfiPkg/EfiPkg.dec
 
 [LibraryClasses]
   BaseLib
@@ -51,8 +50,10 @@
   OcCpuLib.c
   OcCpuInternals.h
 
-[Sources.IA32]
-  IA32/Microcode.nasm
+[Sources.Ia32]
+  Ia32/Atomic.nasm
+  Ia32/Microcode.nasm
 
 [Sources.X64]
+  X64/Atomic.nasm
   X64/Microcode.nasm

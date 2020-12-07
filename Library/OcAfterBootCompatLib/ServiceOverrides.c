@@ -16,12 +16,13 @@
 #include "BootCompatInternal.h"
 
 #include <Guid/AppleVariable.h>
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 
 #include <IndustryStandard/AppleHibernate.h>
 
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
+#include <Library/MemoryAllocationLib.h>
 #include <Library/OcBootManagementLib.h>
 #include <Library/OcDebugLogLib.h>
 #include <Library/OcMemoryLib.h>
@@ -33,6 +34,7 @@
 #include <Library/UefiRuntimeServicesTableLib.h>
 
 #include <Protocol/OcFirmwareRuntime.h>
+#include <Protocol/VMwareMac.h>
 
 /**
   Helper function to mark OpenRuntime as executable with proper permissions.
@@ -116,7 +118,7 @@ ForceExitBootServices (
     // It is too late to free memory map here, but it does not matter, because boot.efi has an old one
     // and will freely use the memory.
     // It is technically forbidden to allocate pool memory here, but we should not hit this code
-    // in the first place, and for older firmwares, where it was necessary (?), it worked just fine.
+    // in the first place, and for older firmware, where it was necessary (?), it worked just fine.
     //
     Status = OcGetCurrentMemoryMapAlloc (
       &MemoryMapSize,
@@ -207,9 +209,9 @@ ProtectMemoryRegions (
   }
 
   //
-  // Some firmwares may leave MMIO regions as reserved memory with runtime flag,
+  // Some types of firmware may leave MMIO regions as reserved memory with runtime flag,
   // which will not get mapped by macOS kernel. This will cause boot failures due
-  // to these firmwares accessing these regions at runtime for NVRAM support.
+  // to such firmware accessing these regions at runtime for NVRAM support.
   // REF: https://github.com/acidanthera/bugtracker/issues/791#issuecomment-608959387
   //
 
@@ -255,7 +257,7 @@ DevirtualiseMmio (
   WhitelistSize = ((BOOT_COMPAT_CONTEXT *) Context)->Settings.MmioWhitelistSize;
 
   //
-  // Some firmwares (normally Haswell and earlier) need certain MMIO areas to have
+  // Some types of firmware (typically Haswell and earlier) need certain MMIO areas to have
   // virtual addresses due to their firmware implementations to access NVRAM.
   // For example, on Intel Haswell with APTIO that would be:
   // 0xFED1C000 (SB_RCBA) is a 0x4 page memory region, containing SPI_BASE at 0x3800 (SPI_BASE_ADDRESS).
@@ -332,9 +334,18 @@ OcAllocatePages (
   EFI_STATUS              Status;
   BOOT_COMPAT_CONTEXT     *BootCompat;
   BOOLEAN                 IsPerfAlloc;
+  BOOLEAN                 IsCallGateAlloc;
 
-  BootCompat  = GetBootCompatContext ();
-  IsPerfAlloc = FALSE;
+  //
+  // Filter out garbage right away.
+  //
+  if (Memory == NULL) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  BootCompat      = GetBootCompatContext ();
+  IsPerfAlloc     = FALSE;
+  IsCallGateAlloc = FALSE;
 
   if (BootCompat->ServiceState.AwaitingPerfAlloc) {
     if (BootCompat->ServiceState.AppleBootNestedCount > 0) {
@@ -348,40 +359,56 @@ OcAllocatePages (
     }
   }
 
-  Status = BootCompat->ServicePtrs.AllocatePages (
-    Type,
-    MemoryType,
-    NumberOfPages,
-    Memory
-    );
+  if (BootCompat->ServiceState.AppleBootNestedCount > 0
+    && Type == AllocateMaxAddress
+    && MemoryType == EfiLoaderCode
+    && *Memory == BASE_4GB - 1
+    && NumberOfPages == 1) {
+    IsCallGateAlloc = TRUE;
+  }
+
+  if (BootCompat->Settings.AllowRelocationBlock
+    && BootCompat->ServiceState.AppleBootNestedCount > 0
+    && Type == AllocateAddress
+    && MemoryType == EfiLoaderData) {
+    Status = AppleRelocationAllocatePages (
+      BootCompat,
+      BootCompat->ServicePtrs.GetMemoryMap,
+      BootCompat->ServicePtrs.AllocatePages,
+      NumberOfPages,
+      Memory
+      );
+  } else {
+    Status = EFI_UNSUPPORTED;
+  }
+
+  if (EFI_ERROR (Status)) {
+    Status = BootCompat->ServicePtrs.AllocatePages (
+      Type,
+      MemoryType,
+      NumberOfPages,
+      Memory
+      );
+  }
+
+  DEBUG ((DEBUG_VERBOSE, "OCABC: AllocPages %u 0x%Lx (%u) - %r\n", Type, *Memory, NumberOfPages, Status));
 
   if (!EFI_ERROR (Status)) {
     FixRuntimeAttributes (BootCompat, MemoryType);
 
     if (BootCompat->ServiceState.AppleBootNestedCount > 0) {
-      if (IsPerfAlloc) {
+      if (IsCallGateAlloc) {
+        //
+        // Called from boot.efi.
+        // Memory allocated for boot.efi to kernel trampoline.
+        //
+        BootCompat->ServiceState.KernelCallGate = *Memory;
+      } else if (IsPerfAlloc) {
         //
         // Called from boot.efi.
         // New perf data, it can be reallocated multiple times.
         //
         OcAppleDebugLogPerfAllocated ((VOID *)(UINTN) *Memory, EFI_PAGES_TO_SIZE (NumberOfPages));
-      } else if (Type == AllocateAddress && MemoryType == EfiLoaderData) {
-        //
-        // Called from boot.efi.
-        // Store minimally allocated address to find kernel image start.
-        //
-        if (BootCompat->ServiceState.MinAllocatedAddr == 0
-          || *Memory < BootCompat->ServiceState.MinAllocatedAddr) {
-          BootCompat->ServiceState.MinAllocatedAddr = *Memory;
-        }
-      } else if (BootCompat->ServiceState.AppleHibernateWake
-        && Type == AllocateAnyPages && MemoryType == EfiLoaderData
-        && BootCompat->ServiceState.HibernateImageAddress == 0) {
-        //
-        // Called from boot.efi during hibernate wake,
-        // first such allocation is for hibernate image
-        //
-        BootCompat->ServiceState.HibernateImageAddress = *Memory;
       }
     }
   }
@@ -456,7 +483,7 @@ OcGetMemoryMap (
   // Reserve larger area for the memory map when we need to split it.
   //
   if (BootCompat->ServiceState.AppleBootNestedCount > 0 && Status == EFI_BUFFER_TOO_SMALL) {
-    *MemoryMapSize += OcCountSplitDescritptors () * *DescriptorSize;
+    *MemoryMapSize += OcCountSplitDescriptors () * *DescriptorSize;
     return EFI_BUFFER_TOO_SMALL;
   }
 
@@ -466,7 +493,7 @@ OcGetMemoryMap (
 
   if (BootCompat->Settings.SyncRuntimePermissions && BootCompat->ServiceState.FwRuntime != NULL) {
     //
-    // Some firmwares mark runtime drivers loaded after EndOfDxe as EfiRuntimeServicesData:
+    // Some types of firmware mark runtime drivers loaded after EndOfDxe as EfiRuntimeServicesData:
     // REF: https://github.com/acidanthera/bugtracker/issues/791#issuecomment-607935508
     //
     Status2 = BootCompat->ServiceState.FwRuntime->GetExecArea (&Address, &Pages);
@@ -629,19 +656,39 @@ OcStartImage (
   //
   // Clear monitoring vars
   //
-  BootCompat->ServiceState.MinAllocatedAddr = 0;
+  BootCompat->ServiceState.KernelCallGate = 0;
 
   if (AppleLoadedImage != NULL) {
     //
     // Report about macOS being loaded.
     //
     ++BootCompat->ServiceState.AppleBootNestedCount;
+
+    //
+    // VMware uses OSInfo->SetName call by EfiBoot to ensure that we are allowed
+    // to run this version of macOS on VMware. The relevant EfiBoot image handle
+    // is determined by the return address of OSInfo->SetName call, which will
+    // be found in the list they make within their StartImage wrapper.
+    //
+    // The problem here happens with Apple Secure Boot, which makes their StartImage
+    // wrapper to not be called and therefore OSInfo->SetName to fail to install anything.
+    // Simply install a protocol here. Maybe make it a quirk if necessary.
+    //
+    Status = gBS->InstallMultipleProtocolInterfaces (
+      &ImageHandle,
+      &gVMwareMacProtocolGuid,
+      NULL,
+      NULL
+      );
+    DEBUG ((DEBUG_INFO, "OCABC: VMware Mac installed on %p - %r\n", ImageHandle, Status));
+
     BootCompat->ServiceState.AppleHibernateWake = OcIsAppleHibernateWake ();
     BootCompat->ServiceState.AppleCustomSlide = OcCheckArgumentFromEnv (
       AppleLoadedImage,
       BootCompat->ServicePtrs.GetVariable,
       "slide=",
-      L_STR_LEN ("slide=")
+      L_STR_LEN ("slide="),
+      NULL
       );
 
     if (BootCompat->Settings.EnableSafeModeSlide) {
@@ -665,8 +712,16 @@ OcStartImage (
       );
 
     if (!EFI_ERROR (Status)) {
-      OSInfo->OSVendor (EFI_OS_INFO_APPLE_VENDOR_NAME);
-      OSInfo->OSName ("Mac OS X 10.15");
+      //
+      // Older versions of the protocol have less fields.
+      // For instance, VMware installs 0x1 version.
+      //
+      if (OSInfo->Revision >= EFI_OS_INFO_PROTOCOL_REVISION_VENDOR) {
+        OSInfo->OSVendor (EFI_OS_INFO_APPLE_VENDOR_NAME);
+      }
+      if (OSInfo->Revision >= EFI_OS_INFO_PROTOCOL_REVISION_NAME) {
+        OSInfo->OSName ("Mac OS X 10.15");
+      }
     }
   }
 
@@ -698,18 +753,6 @@ OcStartImage (
       );
 
     //
-    // Do the same thing for Boot#### variable fallback.
-    //
-    DataSize = sizeof (Config.BootVariableFallback);
-    BootCompat->ServicePtrs.GetVariable (
-      OC_BOOT_FALLBACK_VARIABLE_NAME,
-      &gOcVendorVariableGuid,
-      NULL,
-      &DataSize,
-      &Config.BootVariableFallback
-      );
-
-    //
     // Enable Apple-specific changes if requested.
     // Disable them when this is no longer Apple.
     //
@@ -737,6 +780,10 @@ OcStartImage (
     // We failed but other operating systems should be loadable.
     //
     --BootCompat->ServiceState.AppleBootNestedCount;
+
+    if (BootCompat->ServiceState.AppleBootNestedCount == 0) {
+      AppleRelocationRelease (BootCompat);
+    }
   }
 
   return Status;
@@ -809,19 +856,10 @@ OcExitBootServices (
     return Status;
   }
 
-  if (!BootCompat->ServiceState.AppleHibernateWake) {
-    AppleMapPrepareKernelJump (
-      BootCompat,
-      (UINTN) BootCompat->ServiceState.MinAllocatedAddr,
-      FALSE
-      );
-  } else {
-    AppleMapPrepareKernelJump (
-      BootCompat,
-      (UINTN) BootCompat->ServiceState.HibernateImageAddress,
-      TRUE
-      );
-  }
+  AppleMapPrepareKernelJump (
+    BootCompat,
+    (UINTN) BootCompat->ServiceState.KernelCallGate
+    );
 
   return Status;
 }

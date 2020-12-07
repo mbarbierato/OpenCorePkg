@@ -39,12 +39,14 @@ SafeFileOpen (
 
   DEBUG_CODE_BEGIN ();
   ASSERT (FileName != NULL);
+  ASSERT (NewHandle != NULL);
   Length = StrLen (FileName);
   if (Length > 0 && FileName[Length - 1] == L'\\') {
     DEBUG ((DEBUG_INFO, "OCFS: Filename %s has trailing slash\n", FileName));
   }
   DEBUG_CODE_END ();
 
+  *NewHandle = NULL;
   Status = Protocol->Open (
     Protocol,
     NewHandle,
@@ -52,49 +54,51 @@ SafeFileOpen (
     OpenMode,
     Attributes
     );
+  //
+  // Some boards like ASUS ROG RAMPAGE VI EXTREME may have malfunctioning FS
+  // drivers that report write protection violation errors for read-only
+  // operations but otherwise function as expected.
+  //
+  // REF: https://github.com/acidanthera/bugtracker/issues/1242
+  //
+  if (Status == EFI_WRITE_PROTECTED
+   && OpenMode == EFI_FILE_MODE_READ
+   && Attributes == 0
+   && *NewHandle != NULL) {
+    DEBUG ((
+      DEBUG_VERBOSE,
+      "OCFS: Avoid invalid WP error for Filename %s\n",
+      FileName
+      ));
+    Status = EFI_SUCCESS;
+  }
 
   return Status;
 }
 
 EFI_STATUS
 EFIAPI
-OcOpenFileByDevicePath (
-  IN OUT EFI_DEVICE_PATH_PROTOCOL  **FilePath,
-  OUT    EFI_FILE_PROTOCOL         **File,
-  IN     UINT64                    OpenMode,
-  IN     UINT64                    Attributes
+OcOpenFileByRemainingDevicePath (
+  IN  EFI_HANDLE                      FileSystemHandle,
+  IN  CONST EFI_DEVICE_PATH_PROTOCOL  *RemainingDevicePath,
+  OUT EFI_FILE_PROTOCOL               **File,
+  IN  UINT64                          OpenMode,
+  IN  UINT64                          Attributes
   )
 {
   EFI_STATUS                      Status;
-  EFI_HANDLE                      FileSystemHandle;
   EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *FileSystem;
   EFI_FILE_PROTOCOL               *LastFile;
-  FILEPATH_DEVICE_PATH            *FilePathNode;
+  CONST EFI_DEVICE_PATH_PROTOCOL  *FilePathNode;
   CHAR16                          *AlignedPathName;
   CHAR16                          *PathName;
   UINTN                           PathLength;
   EFI_FILE_PROTOCOL               *NextFile;
 
-  if (File == NULL) {
-    return EFI_INVALID_PARAMETER;
-  }
-  *File = NULL;
+  ASSERT (FileSystemHandle != NULL);
+  ASSERT (RemainingDevicePath != NULL);
+  ASSERT (File != NULL);
 
-  if (FilePath == NULL) {
-    return EFI_INVALID_PARAMETER;
-  }
-
-  //
-  // Look up the filesystem.
-  //
-  Status = gBS->LocateDevicePath (
-                  &gEfiSimpleFileSystemProtocolGuid,
-                  FilePath,
-                  &FileSystemHandle
-                  );
-  if (EFI_ERROR (Status)) {
-    return Status;
-  }
   Status = gBS->OpenProtocol (
                   FileSystemHandle,
                   &gEfiSimpleFileSystemProtocolGuid,
@@ -119,13 +123,13 @@ OcOpenFileByDevicePath (
   //
   // Traverse the device path nodes relative to the filesystem.
   //
-  while (!IsDevicePathEnd (*FilePath)) {
-    if (DevicePathType (*FilePath) != MEDIA_DEVICE_PATH ||
-        DevicePathSubType (*FilePath) != MEDIA_FILEPATH_DP) {
+  FilePathNode = RemainingDevicePath;
+  while (!IsDevicePathEnd (FilePathNode)) {
+    if (DevicePathType (FilePathNode) != MEDIA_DEVICE_PATH ||
+        DevicePathSubType (FilePathNode) != MEDIA_FILEPATH_DP) {
       Status = EFI_INVALID_PARAMETER;
       goto CloseLastFile;
     }
-    FilePathNode = (FILEPATH_DEVICE_PATH *)*FilePath;
 
     //
     // FilePathNode->PathName may be unaligned, and the UEFI specification
@@ -136,7 +140,7 @@ OcOpenFileByDevicePath (
     AlignedPathName = AllocateCopyPool (
                         (DevicePathNodeLength (FilePathNode) -
                          SIZE_OF_FILEPATH_DEVICE_PATH),
-                        FilePathNode->PathName
+                        ((CONST FILEPATH_DEVICE_PATH *) FilePathNode)->PathName
                         );
     if (AlignedPathName == NULL) {
       Status = EFI_OUT_OF_RESOURCES;
@@ -144,8 +148,8 @@ OcOpenFileByDevicePath (
     }
 
     //
-    // This is a compatibility hack for firmwares not supporting
-    // opening filepaths (directories) with a trailing slash in the end.
+    // This is a compatibility hack for firmware types that do not support
+    // opening filepaths (directories) with a trailing slash.
     // More details in a852f85986c1fe23fc3a429605e3c560ea800c54 OpenCorePkg commit.
     //
     PathLength = StrLen (AlignedPathName);
@@ -177,7 +181,7 @@ OcOpenFileByDevicePath (
     //
     LastFile->Close (LastFile);
     LastFile = NextFile;
-    *FilePath = NextDevicePathNode (FilePathNode);
+    FilePathNode = NextDevicePathNode (FilePathNode);
   }
 
   *File = LastFile;
@@ -192,4 +196,40 @@ CloseLastFile:
   //
   ASSERT (EFI_ERROR (Status));
   return Status;
+}
+
+EFI_STATUS
+EFIAPI
+OcOpenFileByDevicePath (
+  IN OUT EFI_DEVICE_PATH_PROTOCOL  **FilePath,
+  OUT    EFI_FILE_PROTOCOL         **File,
+  IN     UINT64                    OpenMode,
+  IN     UINT64                    Attributes
+  )
+{
+  EFI_STATUS Status;
+  EFI_HANDLE FileSystemHandle;
+
+  ASSERT (File != NULL);
+  ASSERT (FilePath != NULL);
+
+  //
+  // Look up the filesystem.
+  //
+  Status = gBS->LocateDevicePath (
+                  &gEfiSimpleFileSystemProtocolGuid,
+                  FilePath,
+                  &FileSystemHandle
+                  );
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  return OcOpenFileByRemainingDevicePath (
+           FileSystemHandle,
+           *FilePath,
+           File,
+           OpenMode,
+           Attributes
+           );
 }

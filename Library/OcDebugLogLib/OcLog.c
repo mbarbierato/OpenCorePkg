@@ -14,7 +14,7 @@
 
 #include <Uefi.h>
 
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 
 #include <Protocol/OcLog.h>
 
@@ -536,12 +536,14 @@ OcConfigureLogProtocol (
 
   if (LogRoot != NULL) {
     if (!EFI_ERROR (Status)) {
-      SetFileData (
-        LogRoot,
-        LogPath,
-        OC_LOG_PRIVATE_DATA_FROM_OC_LOG_THIS (OcLog)->AsciiBuffer,
-        (UINT32) OC_LOG_PRIVATE_DATA_FROM_OC_LOG_THIS (OcLog)->AsciiBufferSize
-        );
+      if (OC_LOG_PRIVATE_DATA_FROM_OC_LOG_THIS (OcLog)->AsciiBufferSize > 0) {
+        SetFileData (
+          LogRoot,
+          LogPath,
+          OC_LOG_PRIVATE_DATA_FROM_OC_LOG_THIS (OcLog)->AsciiBuffer,
+          (UINT32) OC_LOG_PRIVATE_DATA_FROM_OC_LOG_THIS (OcLog)->AsciiBufferSize
+          );
+      }
     } else {
       LogRoot->Close (LogRoot);
       FreePool (LogPath);

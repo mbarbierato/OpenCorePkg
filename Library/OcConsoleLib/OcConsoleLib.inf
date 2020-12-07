@@ -31,14 +31,17 @@
   gAppleVendorVariableGuid
 
 [Protocols]
+  gAppleFramebufferInfoProtocolGuid
   gEfiConsoleControlProtocolGuid
   gEfiGraphicsOutputProtocolGuid
   gEfiSimpleTextOutProtocolGuid
   gEfiUgaDrawProtocolGuid
+  gOcForceResolutionProtocolGuid
 
 [Sources]
   ConsoleControl.c
   ConsoleGop.c
+  FramebufferInfo.c
   OcConsoleLib.c
   OcConsoleLibInternal.h
   ResolutionParsing.c
@@ -48,7 +51,6 @@
   UgaPassThrough.c
 
 [Packages]
-  EfiPkg/EfiPkg.dec
   MdeModulePkg/MdeModulePkg.dec
   MdePkg/MdePkg.dec
   OpenCorePkg/OpenCorePkg.dec

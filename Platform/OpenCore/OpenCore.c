@@ -15,12 +15,13 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <OpenCore.h>
 #include <Uefi.h>
 
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 
 #include <Protocol/DevicePath.h>
 #include <Protocol/LoadedImage.h>
 #include <Protocol/OcBootstrap.h>
 #include <Protocol/SimpleFileSystem.h>
+#include <Protocol/VMwareDebug.h>
 
 #include <Library/DebugLib.h>
 #include <Library/OcDebugLogLib.h>
@@ -60,13 +61,26 @@ OC_PRIVILEGE_CONTEXT
 mOpenCorePrivilege;
 
 STATIC
+EFI_HANDLE
+mStorageHandle;
+
+STATIC
+EFI_DEVICE_PATH_PROTOCOL *
+mStoragePath;
+
+STATIC
+CHAR16 *
+mStorageRoot;
+
+STATIC
 EFI_STATUS
 EFIAPI
 OcStartImage (
   IN  OC_BOOT_ENTRY               *Chosen,
   IN  EFI_HANDLE                  ImageHandle,
   OUT UINTN                       *ExitDataSize,
-  OUT CHAR16                      **ExitData    OPTIONAL
+  OUT CHAR16                      **ExitData    OPTIONAL,
+  IN  BOOLEAN                     LaunchInText
   )
 {
   EFI_STATUS                       Status;
@@ -94,7 +108,9 @@ OcStartImage (
     FreePool (DevicePathText);
   }
 
-  OldMode = OcConsoleControlSetMode (EfiConsoleControlScreenGraphics);
+  OldMode = OcConsoleControlSetMode (
+    LaunchInText ? EfiConsoleControlScreenText : EfiConsoleControlScreenGraphics
+    );
 
   Status = gBS->StartImage (
     ImageHandle,
@@ -119,7 +135,6 @@ OcMain (
   )
 {
   EFI_STATUS                Status;
-  EFI_HANDLE                LoadHandle;
   OC_PRIVILEGE_CONTEXT      *Privilege;
 
   DEBUG ((DEBUG_INFO, "OC: OcMiscEarlyInit...\n"));
@@ -137,6 +152,8 @@ OcMain (
 
   DEBUG ((DEBUG_INFO, "OC: OcLoadNvramSupport...\n"));
   OcLoadNvramSupport (Storage, &mOpenCoreConfiguration);
+  DEBUG ((DEBUG_INFO, "OC: OcMiscMiddleInit...\n"));
+  OcMiscMiddleInit (Storage, &mOpenCoreConfiguration, mStorageRoot, LoadPath, mStorageHandle);
   DEBUG ((DEBUG_INFO, "OC: OcLoadUefiSupport...\n"));
   OcLoadUefiSupport (Storage, &mOpenCoreConfiguration, &mOpenCoreCpuInfo);
   if (mOpenCoreConfiguration.Acpi.Quirks.EnableForAll) {
@@ -144,7 +161,7 @@ OcMain (
     OcLoadAcpiSupport (&mOpenCoreStorage, &mOpenCoreConfiguration);
   }
   DEBUG ((DEBUG_INFO, "OC: OcMiscLateInit...\n"));
-  OcMiscLateInit (&mOpenCoreConfiguration, LoadPath, &LoadHandle);
+  OcMiscLateInit (Storage, &mOpenCoreConfiguration);
   DEBUG ((DEBUG_INFO, "OC: OcLoadKernelSupport...\n"));
   OcLoadKernelSupport (&mOpenCoreStorage, &mOpenCoreConfiguration, &mOpenCoreCpuInfo);
 
@@ -159,7 +176,7 @@ OcMain (
     Privilege = NULL;
   }
 
-  DEBUG ((DEBUG_INFO, "OC: OpenCore is loaded, showing boot menu...\n"));
+  DEBUG ((DEBUG_INFO, "OC: All green, starting boot management...\n"));
 
   OcMiscBoot (
     &mOpenCoreStorage,
@@ -167,7 +184,7 @@ OcMain (
     Privilege,
     OcStartImage,
     mOpenCoreConfiguration.Uefi.Quirks.RequestBootVarRouting,
-    LoadHandle
+    mStorageHandle
     );
 }
 
@@ -180,7 +197,9 @@ OcBootstrapRerun (
   IN EFI_DEVICE_PATH_PROTOCOL         *LoadPath OPTIONAL
   )
 {
-  EFI_STATUS          Status;
+  EFI_STATUS                Status;
+  EFI_DEVICE_PATH_PROTOCOL  *RemainingPath;
+  UINTN                     StoragePathSize;
 
   DEBUG ((DEBUG_INFO, "OC: ReRun executed!\n"));
 
@@ -189,10 +208,65 @@ OcBootstrapRerun (
   if (This->NestedCount == 1) {
     mOpenCoreVaultKey = OcGetVaultKey (This);
 
+    //
+    // Calculate root path (never freed).
+    //
+    RemainingPath = NULL;
+    if (LoadPath != NULL) {
+      ASSERT (mStorageRoot == NULL);
+      mStorageRoot = OcCopyDevicePathFullName (LoadPath, &RemainingPath);
+      //
+      // Skipping this or later failing to call UnicodeGetParentDirectory means
+      // we got valid path to the root of the partition. This happens when
+      // OpenCore.efi was loaded from e.g. firmware and then bootstrapped
+      // on a different partition.
+      //
+      if (mStorageRoot != NULL) {
+        if (UnicodeGetParentDirectory (mStorageRoot)) {
+          //
+          // This means we got valid path to ourselves.
+          //
+          DEBUG ((DEBUG_INFO, "OC: Got launch root path %s\n", mStorageRoot));
+        } else {
+          FreePool (mStorageRoot);
+          mStorageRoot = NULL;
+        }
+      }
+    }
+
+    if (mStorageRoot == NULL) {
+      mStorageRoot = OPEN_CORE_ROOT_PATH;
+      RemainingPath = NULL;
+      DEBUG ((DEBUG_INFO, "OC: Got default root path %s\n", mStorageRoot));
+    }
+
+    //
+    // Calculate storage path.
+    //
+    if (RemainingPath != NULL) {
+      StoragePathSize = (UINTN) RemainingPath - (UINTN) LoadPath;
+      mStoragePath = AllocatePool (StoragePathSize + END_DEVICE_PATH_LENGTH);
+      if (mStoragePath != NULL) {
+        CopyMem (mStoragePath, LoadPath, StoragePathSize);
+        SetDevicePathEndNode ((UINT8 *) mStoragePath + StoragePathSize);
+      }
+    } else {
+      mStoragePath = NULL;
+    }
+
+    RemainingPath = LoadPath;
+    gBS->LocateDevicePath (
+      &gEfiSimpleFileSystemProtocolGuid,
+      &RemainingPath,
+      &mStorageHandle
+      );
+
     Status = OcStorageInitFromFs (
       &mOpenCoreStorage,
       FileSystem,
-      OPEN_CORE_ROOT_PATH,
+      mStorageHandle,
+      mStoragePath,
+      mStorageRoot,
       mOpenCoreVaultKey
       );
 
@@ -216,12 +290,23 @@ OcBootstrapRerun (
 }
 
 STATIC
+EFI_HANDLE
+EFIAPI
+OcGetLoadHandle (
+  IN OC_BOOTSTRAP_PROTOCOL            *This
+  )
+{
+  return mStorageHandle;
+}
+
+STATIC
 OC_BOOTSTRAP_PROTOCOL
 mOpenCoreBootStrap = {
-  .Revision    = OC_BOOTSTRAP_PROTOCOL_REVISION,
-  .NestedCount = 0,
-  .VaultKey    = NULL,
-  .ReRun       = OcBootstrapRerun
+  .Revision      = OC_BOOTSTRAP_PROTOCOL_REVISION,
+  .NestedCount   = 0,
+  .VaultKey      = NULL,
+  .ReRun         = OcBootstrapRerun,
+  .GetLoadHandle = OcGetLoadHandle,
 };
 
 EFI_STATUS

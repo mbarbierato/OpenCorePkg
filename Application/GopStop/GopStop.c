@@ -157,7 +157,7 @@ AnalyzeGopHandle (
   if (NewMode >= 0) {
     Status = Gop->SetMode (
       Gop,
-      (UINTN) NewMode
+      (UINT32) NewMode
       );
 
     Info = Gop->Mode->Info;
@@ -384,7 +384,7 @@ UefiMain (
 
   DEBUG ((
     DEBUG_WARN,
-    "GTT: Found %u handles with GOP protocol - %r\n",
+    "GSTT: Found %u handles with GOP protocol - %r\n",
     (UINT32) HandleCount,
     Status
     ));
@@ -398,7 +398,7 @@ UefiMain (
   //
   Reports = AllocateZeroPool (EFI_PAGE_SIZE * HandleCount);
   if (Reports == NULL) {
-    DEBUG ((DEBUG_WARN, "GTT: Cannot allocate memory for GOP reports\n"));
+    DEBUG ((DEBUG_WARN, "GSTT: Cannot allocate memory for GOP reports\n"));
     FreePool (HandleBuffer);
     return EFI_OUT_OF_RESOURCES;
   }
@@ -437,11 +437,11 @@ UefiMain (
       (UINT32) Date.Second
       );
 
-    SetFileData (NULL, Filename, FinalReport, AsciiStrLen (FinalReport));
+    SetFileData (NULL, Filename, FinalReport, (UINT32) AsciiStrLen (FinalReport));
 
     FreePool (FinalReport);
   } else {
-    DEBUG ((DEBUG_WARN, "GTT: Cannot allocate memory for final report\n"));
+    DEBUG ((DEBUG_WARN, "GSTT: Cannot allocate memory for final report\n"));
   }
 
   //

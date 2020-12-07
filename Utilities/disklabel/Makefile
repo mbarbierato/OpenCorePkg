@@ -1,21 +1,15 @@
-CC ?= gcc
-CFLAGS=-c -Wall -Wextra -pedantic -O3
-LDFLAGS ?=
+## @file
+# Copyright (c) 2019, vit9696. All rights reserved.
+# Copyright (c) 2020, PMheart. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+##
 
-ifneq ($(OS),Windows_NT)
-	UNAME_S := $(shell uname -s)
-	ifeq ($(UNAME_S),Darwin)
-		LDFLAGS+=-Wl,-framework,CoreFoundation -Wl,-framework,CoreGraphics -Wl,-framework,CoreText
-	endif
+STANDALONE = 1
+PROJECT    = disklabel
+PRODUCT    = $(PROJECT)$(SUFFIX)
+OBJS       = $(PROJECT).o
+include ../../User/Makefile
+
+ifeq ($(DIST),Darwin)
+	LDFLAGS += -Wl,-framework,CoreFoundation -Wl,-framework,CoreGraphics -Wl,-framework,CoreText
 endif
-
-all: disklabel
-
-disklabel: disklabel.o
-	$(CC) $(LDFLAGS) disklabel.o -o disklabel
-
-.c:
-	$(CC) $(CFLAGS) $< -o $@
-
-clean:
-	rm -rf *.o disklabel

@@ -45,11 +45,13 @@
   Views/BootPicker.c
 
 [Packages]
-  EfiPkg/EfiPkg.dec
   OpenCorePkg/OpenCorePkg.dec
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
   UefiCpuPkg/UefiCpuPkg.dec
+
+[Guids]
+  gAppleVendorVariableGuid
 
 [Protocols]
   gEfiGraphicsOutputProtocolGuid
@@ -68,10 +70,13 @@
   DebugLib
   FrameBufferBltLib
   MemoryAllocationLib
-  OcBootManagementLib
+  MtrrLib
+  OcAppleKeyMapLib
   OcCompressionLib
   OcGuardLib
+  OcMiscLib
   OcPngLib
   OcStorageLib
+  TimerLib
   UefiBootServicesTableLib
   UefiDriverEntryPoint

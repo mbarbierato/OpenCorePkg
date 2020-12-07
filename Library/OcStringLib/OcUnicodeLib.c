@@ -15,7 +15,9 @@
 #include <Base.h>
 
 #include <Library/BaseLib.h>
+#include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
+#include <Library/OcGuardLib.h>
 #include <Library/OcStringLib.h>
 #include <Library/PrintLib.h>
 #include <Library/PcdLib.h>
@@ -135,6 +137,64 @@ OcStriStr (
   return NULL;
 }
 
+CONST CHAR16 *
+OcStrStrLength (
+  CONST CHAR16  *String,
+  UINTN         StringLength,
+  CONST CHAR16  *SearchString,
+  UINTN         SearchStringLength
+  )
+{
+  UINTN         Index;
+  UINTN         Index2;
+  UINTN         Index3;
+  INTN          CmpResult;
+  CONST CHAR16  *Y;
+  CONST CHAR16  *X;
+
+  //
+  // REF: http://www-igm.univ-mlv.fr/~lecroq/string/node13.html#SECTION00130
+  //
+
+  if (SearchStringLength > StringLength
+    || SearchStringLength == 0
+    || StringLength == 0) {
+    return NULL;
+  }
+
+  if (SearchStringLength > 1) {
+    Index = 0;
+
+    Y = (CONST CHAR16 *) String;
+    X = (CONST CHAR16 *) SearchString;
+
+    if (X[0] == X[1]) {
+      Index2 = 2;
+      Index3 = 1;
+    } else {
+      Index2 = 1;
+      Index3 = 2;
+    }
+
+    while (Index <= StringLength - SearchStringLength) {
+      if (X[1] != Y[Index+1]) {
+        Index += Index2;
+      } else {
+        CmpResult = CompareMem (X+2, Y+Index+2, (SearchStringLength - 2) * sizeof (*SearchString));
+        if (CmpResult == 0 && X[0] == Y[Index]) {
+          return &Y[Index];
+        }
+
+        Index += Index3;
+      }
+    }
+  } else {
+    return ScanMem16 (String, StringLength * sizeof (*SearchString), *SearchString);
+  }
+
+  return NULL;
+}
+
 VOID
 UnicodeUefiSlashes (
   IN OUT CHAR16  *String
@@ -145,6 +205,65 @@ UnicodeUefiSlashes (
   while ((Needle = StrStr (String, L"/")) != NULL) {
     *Needle = L'\\';
   }
+}
+
+BOOLEAN
+UnicodeGetParentDirectory (
+  IN OUT CHAR16  *String
+  )
+{
+  UINTN  Length;
+
+  Length = StrLen (String);
+
+  //
+  // Drop starting slash (as it cannot be passed to some drivers).
+  //
+  if (String[0] == '\\' || String[0] == '/') {
+    CopyMem (&String[0], &String[1], Length * sizeof (String[0]));
+    --Length;
+  }
+
+  //
+  // Empty paths have no root directory.
+  //
+  if (Length == 0) {
+    return FALSE;
+  }
+
+  //
+  // Drop trailing slash when getting a directory.
+  //
+  if (String[Length - 1] == '\\' && String[Length - 1] == '/') {
+    --Length;
+    //
+    // Paths with just one slash have no root directory (e.g. \\/).
+    //
+    if (Length == 0) {
+      return FALSE;
+    }
+  }
+
+  //
+  // Find slash in the path.
+  //
+  while (String[Length - 1] != '\\' && String[Length - 1] != '/') {
+    --Length;
+
+    //
+    // Paths containing just a filename get normalised.
+    //
+    if (Length == 0) {
+      *String = '\0';
+      return TRUE;
+    }
+  }
+
+  //
+  // Path containing some other directory get its path.
+  //
+  String[Length - 1] = '\0';
+  return TRUE;
 }
 
 VOID
@@ -210,4 +329,24 @@ OcUnicodeSafeSPrint (
   VA_END (Marker);
 
   return Status;
+}
+
+BOOLEAN
+EFIAPI
+OcUnicodeEndsWith (
+  IN CONST CHAR16     *String,
+  IN CONST CHAR16     *SearchString
+  )
+{
+  UINTN   StringLength;
+  UINTN   SearchStringLength;
+
+  ASSERT (String != NULL);
+  ASSERT (SearchString != NULL);
+
+  StringLength        = StrLen (String);
+  SearchStringLength  = StrLen (SearchString);
+
+  return StringLength >= SearchStringLength
+    && StrnCmp (&String[StringLength - SearchStringLength], SearchString, SearchStringLength) == 0;
 }

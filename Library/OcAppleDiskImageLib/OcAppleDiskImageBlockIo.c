@@ -20,6 +20,7 @@
 #include <Library/DebugLib.h>
 #include <Library/DevicePathLib.h>
 #include <Library/MemoryAllocationLib.h>
+#include <Library/OcApfsLib.h>
 #include <Library/OcAppleDiskImageLib.h>
 #include <Library/OcStringLib.h>
 #include <Library/PrintLib.h>
@@ -220,7 +221,7 @@ InternalConstructDmgDevicePath (
     );
 
   UnicodeDevPath = ConvertDevicePathToText ((EFI_DEVICE_PATH_PROTOCOL *)DevPath, FALSE, FALSE);
-  DEBUG ((DEBUG_INFO, "Built DMG DP: %s\n", UnicodeDevPath != NULL ? UnicodeDevPath : L"<NULL>"));
+  DEBUG ((DEBUG_INFO, "OCDI: Built DMG DP: %s\n", UnicodeDevPath != NULL ? UnicodeDevPath : L"<NULL>"));
   if (UnicodeDevPath != NULL) {
     FreePool (UnicodeDevPath);
   }
@@ -290,7 +291,9 @@ OcAppleDiskImageInstallBlockIo (
   }
 
   Status = gBS->ConnectController (BlockIoHandle, NULL, NULL, TRUE);
-  if (EFI_ERROR (Status)) {
+  if (!EFI_ERROR (Status)) {
+    OcApfsConnectParentDevice (BlockIoHandle, FALSE);
+  } else {
     DEBUG ((DEBUG_INFO, "OCDI: Failed to connect DMG handle %r\n", Status));
 
     Status = gBS->UninstallMultipleProtocolInterfaces (

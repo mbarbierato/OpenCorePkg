@@ -111,7 +111,8 @@ OcAbcInitialize (
 
   DEBUG ((
     DEBUG_INFO,
-    "OCABC: RTDFRG %d DEVMMIO %d NOSU %d NOVRWR %d NOSB %d NOHBMAP %d SMSLIDE %d WRUNPROT %d\n",
+    "OCABC: ALRBL %d RTDFRG %d DEVMMIO %d NOSU %d NOVRWR %d NOSB %d NOHBMAP %d SMSLIDE %d WRUNPROT %d\n",
+    Settings->AllowRelocationBlock,
     Settings->AvoidRuntimeDefrag,
     Settings->DevirtualiseMmio,
     Settings->DisableSingleUser,
@@ -124,10 +125,11 @@ OcAbcInitialize (
 
   DEBUG ((
     DEBUG_INFO,
-    "OCABC: FEXITBS %d PRMRG %d CSLIDE %d PRSRV %d RBMAP %d VMAP %d APPLOS %d RTPERMS %d\n",
+    "OCABC: FEXITBS %d PRMRG %d CSLIDE %d MSLIDE %d PRSRV %d RBMAP %d VMAP %d APPLOS %d RTPERMS %d\n",
     Settings->ForceExitBootServices,
     Settings->ProtectMemoryRegions,
     Settings->ProvideCustomSlide,
+    Settings->ProvideMaxSlide,
     Settings->ProtectUefiServices,
     Settings->RebuildAppleMemoryMap,
     Settings->SetupVirtualMap,

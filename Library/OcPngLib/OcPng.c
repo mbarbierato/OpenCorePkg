@@ -22,7 +22,7 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include "lodepng.h"
 
 EFI_STATUS
-GetPngDims (
+OcGetPngDims (
   IN  VOID    *Buffer,
   IN  UINTN   Size,
   OUT UINT32  *Width,
@@ -50,7 +50,7 @@ GetPngDims (
   lodepng_state_cleanup (&State);
 
   if (Error != 0) {
-    DEBUG ((DEBUG_INFO, "OcPngLib: Error while getting image dimensions from PNG header\n"));
+    DEBUG ((DEBUG_INFO, "OCPNG: Error while getting image dimensions from PNG header\n"));
     return EFI_INVALID_PARAMETER;
   }
 
@@ -61,7 +61,7 @@ GetPngDims (
 }
 
 EFI_STATUS
-DecodePng (
+OcDecodePng (
   IN   VOID    *Buffer,
   IN   UINTN   Size,
   OUT  VOID    **RawData,
@@ -91,7 +91,7 @@ DecodePng (
   Error = lodepng_decode ((unsigned char **) RawData, &W, &H, &State, Buffer, Size);
 
   if (Error != 0) {
-    DEBUG ((DEBUG_INFO, "OcPngLib: Error while decoding PNG image\n"));
+    DEBUG ((DEBUG_INFO, "OCPNG: Error while decoding PNG image - %u\n", Error));
     lodepng_state_cleanup (&State);
     return EFI_INVALID_PARAMETER;
   }
@@ -115,7 +115,7 @@ DecodePng (
 }
 
 EFI_STATUS
-EncodePng (
+OcEncodePng (
   IN  VOID    *RawData,
   IN  UINT32  Width,
   IN  UINT32  Height,
@@ -131,7 +131,7 @@ EncodePng (
   Error = lodepng_encode32 ((unsigned char **) Buffer, BufferSize, RawData, Width, Height);
 
   if (Error != 0) {
-    DEBUG ((DEBUG_INFO, "OcPngLib: Error while encoding PNG image\n"));
+    DEBUG ((DEBUG_INFO, "OCPNG: Error while encoding PNG image\n"));
     return EFI_INVALID_PARAMETER;
   }
 

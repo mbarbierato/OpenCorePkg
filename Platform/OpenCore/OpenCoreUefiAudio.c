@@ -15,7 +15,7 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <OpenCore.h>
 
 #include <Guid/AppleVariable.h>
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 #include <Guid/GlobalVariable.h>
 
 #include <Library/BaseLib.h>
@@ -114,9 +114,6 @@ OcAudioAcquireFile (
         case OcVoiceOverAudioFileDefault:
           BasePath = "Default";
           break;
-        case OcVoiceOverAudioFileDiskImage:
-          BasePath = "DiskImage";
-          break;
         case OcVoiceOverAudioFileEnterPassword:
           BasePath = "EnterPassword";
           break;
@@ -146,6 +143,9 @@ OcAudioAcquireFile (
           break;
         case OcVoiceOverAudioFilemacOS_TimeMachine:
           BasePath = "macOS_TimeMachine";
+          break;
+        case OcVoiceOverAudioFilemacOS_UpdateFw:
+          BasePath = "macOS_UpdateFw";
           break;
         case OcVoiceOverAudioFileOtherOS:
           BasePath = "OtherOS";
@@ -371,10 +371,16 @@ OcLoadUefiAudioSupport (
     }
   }
 
+  //
+  // NULL DevicePath means choose the first audio device available on the platform.
+  //
+
   OcAudio = OcAudioInstallProtocols (FALSE);
   if (OcAudio == NULL) {
     DEBUG ((DEBUG_INFO, "OC: Cannot locate OcAudio protocol\n"));
-    FreePool (DevicePath);
+    if (DevicePath != NULL) {
+      FreePool (DevicePath);
+    }
     return;
   }
 
@@ -390,7 +396,9 @@ OcLoadUefiAudioSupport (
       ? Config->Uefi.Audio.MinimumVolume : VolumeLevel
     );
 
-  FreePool (DevicePath);
+  if (DevicePath != NULL) {
+    FreePool (DevicePath);
+  }
 
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_INFO, "OC: Audio connection failed - %r\n", Status));

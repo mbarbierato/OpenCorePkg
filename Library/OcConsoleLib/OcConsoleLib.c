@@ -16,6 +16,7 @@
 
 #include <Protocol/ConsoleControl.h>
 #include <Protocol/GraphicsOutput.h>
+#include <Protocol/OcForceResolution.h>
 #include <Protocol/SimpleTextOut.h>
 
 #include <Library/BaseMemoryLib.h>
@@ -31,8 +32,8 @@
 EFI_STATUS
 OcSetConsoleResolutionForProtocol (
   IN  EFI_GRAPHICS_OUTPUT_PROTOCOL    *GraphicsOutput,
-  IN  UINT32                          Width,
-  IN  UINT32                          Height,
+  IN  UINT32                          Width  OPTIONAL,
+  IN  UINT32                          Height OPTIONAL,
   IN  UINT32                          Bpp    OPTIONAL
   )
 {
@@ -98,7 +99,8 @@ OcSetConsoleResolutionForProtocol (
             && (Info->PixelInformation.RedMask  == 0xFF000000U
               || Info->PixelInformation.RedMask == 0xFF0000U
               || Info->PixelInformation.RedMask == 0xFF00U
-              || Info->PixelInformation.RedMask == 0xFFU)))) {
+              || Info->PixelInformation.RedMask == 0xFFU))
+          || Info->PixelFormat == PixelBltOnly)) {
         ModeNumber = ModeIndex;
         FreePool (Info);
         break;
@@ -120,7 +122,7 @@ OcSetConsoleResolutionForProtocol (
 
   if (ModeNumber == GraphicsOutput->Mode->Mode) {
     DEBUG ((DEBUG_INFO, "OCC: Current mode matches desired mode %u\n", (UINT32) ModeNumber));
-    return EFI_SUCCESS;
+    return EFI_ALREADY_STARTED;
   }
 
   //
@@ -270,20 +272,43 @@ OcSetConsoleModeForProtocol (
 
 EFI_STATUS
 OcSetConsoleResolution (
-  IN  UINT32              Width,
-  IN  UINT32              Height,
-  IN  UINT32              Bpp    OPTIONAL
+  IN  UINT32              Width  OPTIONAL,
+  IN  UINT32              Height OPTIONAL,
+  IN  UINT32              Bpp    OPTIONAL,
+  IN  BOOLEAN             Force
   )
 {
-  EFI_STATUS                    Status;
+  EFI_STATUS                    Result;
   EFI_GRAPHICS_OUTPUT_PROTOCOL  *GraphicsOutput;
+  OC_FORCE_RESOLUTION_PROTOCOL  *OcForceResolution;
+
+  //
+  // Force resolution if specified.
+  //
+  if (Force) {
+    Result = gBS->LocateProtocol (
+      &gOcForceResolutionProtocolGuid,
+      NULL,
+      (VOID **) &OcForceResolution
+      );
+
+    if (!EFI_ERROR (Result)) {
+      Result = OcForceResolution->SetResolution (OcForceResolution, Width, Height);
+      if (EFI_ERROR (Result)) {
+        DEBUG ((DEBUG_WARN, "OCC: Failed to force resolution - %r\n", Result));
+      }
+    } else {
+      DEBUG ((DEBUG_WARN, "OCC: Missing OcForceResolution protocol - %r\n", Result));
+    }
+  }
 
 #ifdef OC_CONSOLE_CHANGE_ALL_RESOLUTIONS
+  EFI_STATUS                    Status;
   UINTN                         HandleCount;
   EFI_HANDLE                    *HandleBuffer;
   UINTN                         Index;
 
-  Status = gBS->LocateHandleBuffer (
+  Result = gBS->LocateHandleBuffer (
     ByProtocol,
     &gEfiGraphicsOutputProtocolGuid,
     NULL,
@@ -291,7 +316,9 @@ OcSetConsoleResolution (
     &HandleBuffer
     );
 
-  if (!EFI_ERROR (Status)) {
+  if (!EFI_ERROR (Result)) {
+    Result = EFI_NOT_FOUND;
+
     DEBUG ((DEBUG_INFO, "OCC: Found %u handles with GOP\n", (UINT32) HandleCount));
 
     for (Index = 0; Index < HandleCount; ++Index) {
@@ -308,29 +335,29 @@ OcSetConsoleResolution (
         continue;
       }
 
-      Status = OcSetConsoleResolutionForProtocol (GraphicsOutput, Width, Height, Bpp);
+      Result = OcSetConsoleResolutionForProtocol (GraphicsOutput, Width, Height, Bpp);
     }
 
     FreePool (HandleBuffer);
   } else {
-    DEBUG ((DEBUG_INFO, "OCC: Failed to find handles with GOP\n"));
+    DEBUG ((DEBUG_INFO, "OCC: Failed to find handles with GOP - %r\n", Result));
   }
 #else
-  Status = gBS->HandleProtocol (
+  Result = gBS->HandleProtocol (
     gST->ConsoleOutHandle,
     &gEfiGraphicsOutputProtocolGuid,
     (VOID **) &GraphicsOutput
     );
 
-  if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_WARN, "OCC: Missing GOP on ConOut - %r\n", Status));
-    return Status;
+  if (EFI_ERROR (Result)) {
+    DEBUG ((DEBUG_WARN, "OCC: Missing GOP on ConOut - %r\n", Result));
+    return Result;
   }
 
-  Status = OcSetConsoleResolutionForProtocol (GraphicsOutput, Width, Height, Bpp);
+  Result = OcSetConsoleResolutionForProtocol (GraphicsOutput, Width, Height, Bpp);
 #endif
 
-  return Status;
+  return Result;
 }
 
 EFI_STATUS
@@ -352,7 +379,9 @@ OcSetupConsole (
   )
 {
   if (Renderer == OcConsoleRendererBuiltinGraphics) {
-    OcUseBuiltinTextOutput ();
+    OcUseBuiltinTextOutput (EfiConsoleControlScreenGraphics);
+  } else if (Renderer == OcConsoleRendererBuiltinText) {
+    OcUseBuiltinTextOutput (EfiConsoleControlScreenText);
   } else {
     OcUseSystemTextOutput (
       Renderer,

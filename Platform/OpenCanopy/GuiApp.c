@@ -321,16 +321,16 @@ InternalContextConstruct (
   }
 
   if (Context->BackgroundColor.Raw == APPLE_COLOR_SYRAH_BLACK) {
-    Context->Light = FALSE;
+    Context->LightBackground = FALSE;
   } else if (Context->BackgroundColor.Raw == APPLE_COLOR_LIGHT_GRAY) {
-    Context->Light = TRUE;
+    Context->LightBackground = TRUE;
   } else {
     //
     // FIXME: Support proper W3C formula.
     //
-    Context->Light = (Context->BackgroundColor.Pixel.Red * 299U
+    Context->LightBackground = (Context->BackgroundColor.Pixel.Red * 299U
       + Context->BackgroundColor.Pixel.Green * 587U
-      + Context->BackgroundColor.Pixel.Blue * 114U) <= 186000;
+      + Context->BackgroundColor.Pixel.Blue * 114U) >= 186000;
   }
 
   Context->BootEntry = NULL;
@@ -368,11 +368,24 @@ InternalContextConstruct (
         );
     }
 
+    //
+    // For generic disk icon being able to distinguish internal and external
+    // disk icons is a security requirement. These icons are used whenever
+    // 'typed' external icons are not available.
+    //
+    if (!EFI_ERROR (Status)
+      && Index == ICON_GENERIC_HDD
+      && Context->Icons[Index][ICON_TYPE_EXTERNAL].Buffer == NULL) {
+      Status = EFI_NOT_FOUND;
+      DEBUG ((DEBUG_WARN, "OCUI: Missing external disk icon\n"));
+      break;
+    }
+
     if (EFI_ERROR (Status) && Index < ICON_NUM_MANDATORY) {
       break;
-    } else {
-      Status = EFI_SUCCESS;
     }
+
+    Status = EFI_SUCCESS;
   }
 
   if (!EFI_ERROR (Status)) {
@@ -381,20 +394,25 @@ InternalContextConstruct (
         Storage,
         mLabelNames[Index],
         Context->Scale,
-        Context->Light,
+        Context->LightBackground,
         &Context->Labels[Index]
         );
     }
   }
 
   if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_ERROR, "OCUI: Failed to load images\n"));
+    DEBUG ((DEBUG_WARN, "OCUI: Failed to load images\n"));
     InternalContextDestruct (Context);
     return EFI_UNSUPPORTED;
   }
 
-  FontImage = OcStorageReadFileUnicode (Storage, OPEN_CORE_FONT_PATH L"Font.png", &FontImageSize);
-  FontData  = OcStorageReadFileUnicode (Storage, OPEN_CORE_FONT_PATH L"Font.bin", &FontDataSize);
+  if (Context->Scale == 2) {
+    FontImage = OcStorageReadFileUnicode (Storage, OPEN_CORE_FONT_PATH L"Font_2x.png", &FontImageSize);
+    FontData  = OcStorageReadFileUnicode (Storage, OPEN_CORE_FONT_PATH L"Font_2x.bin", &FontDataSize);
+  } else {
+    FontImage = OcStorageReadFileUnicode (Storage, OPEN_CORE_FONT_PATH L"Font_1x.png", &FontImageSize);
+    FontData  = OcStorageReadFileUnicode (Storage, OPEN_CORE_FONT_PATH L"Font_1x.bin", &FontDataSize);
+  }
 
   if (FontImage != NULL && FontData != NULL) {
     Result = GuiFontConstruct (
@@ -404,7 +422,13 @@ InternalContextConstruct (
       FontData,
       FontDataSize
       );
-    if (Context->FontContext.BmfContext.Height  != BOOT_ENTRY_LABEL_HEIGHT) {
+    if (Context->FontContext.BmfContext.Height != BOOT_ENTRY_LABEL_HEIGHT * Context->Scale) {
+        DEBUG((
+          DEBUG_WARN,
+          "OCUI: Font has height %d instead of %d\n",
+          Context->FontContext.BmfContext.Height,
+          BOOT_ENTRY_LABEL_HEIGHT * Context->Scale
+          ));
       Result = FALSE;
     }
   } else {
@@ -422,15 +446,12 @@ InternalContextConstruct (
 
 CONST GUI_IMAGE *
 InternalGetCursorImage (
-  IN OUT GUI_SCREEN_CURSOR  *This,
-  IN     VOID               *Context
+  IN OUT GUI_SCREEN_CURSOR       *This,
+  IN     BOOT_PICKER_GUI_CONTEXT *Context
   )
 {
-  CONST BOOT_PICKER_GUI_CONTEXT *GuiContext;
-
   ASSERT (This != NULL);
   ASSERT (Context != NULL);
 
-  GuiContext = (CONST BOOT_PICKER_GUI_CONTEXT *)Context;
-  return &GuiContext->Icons[ICON_CURSOR][ICON_TYPE_BASE];
+  return &Context->Icons[ICON_CURSOR][ICON_TYPE_BASE];
 }

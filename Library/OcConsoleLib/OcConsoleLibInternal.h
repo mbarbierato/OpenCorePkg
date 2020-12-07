@@ -21,6 +21,9 @@
 #include <Protocol/SimpleTextOut.h>
 #include <Protocol/UgaDraw.h>
 
+#define DEFAULT_COLOUR_DEPTH 32
+#define DEFAULT_REFRESH_RATE 60
+
 typedef struct {
   EFI_GRAPHICS_OUTPUT_PROTOCOL  *GraphicsOutput;
   EFI_UGA_DRAW_PROTOCOL         Uga;
@@ -29,8 +32,8 @@ typedef struct {
 EFI_STATUS
 OcSetConsoleResolutionForProtocol (
   IN  EFI_GRAPHICS_OUTPUT_PROTOCOL    *GraphicsOutput,
-  IN  UINT32                          Width,
-  IN  UINT32                          Height,
+  IN  UINT32                          Width  OPTIONAL,
+  IN  UINT32                          Height OPTIONAL,
   IN  UINT32                          Bpp    OPTIONAL
   );
 
@@ -48,23 +51,18 @@ OcConsoleControlInstallProtocol (
   OUT EFI_CONSOLE_CONTROL_SCREEN_MODE  *OldMode  OPTIONAL
   );
 
-VOID
+EFI_STATUS
 OcUseBuiltinTextOutput (
-  VOID
+  IN EFI_CONSOLE_CONTROL_SCREEN_MODE  Mode
   );
 
-VOID
+EFI_STATUS
 OcUseSystemTextOutput (
   IN OC_CONSOLE_RENDERER          Renderer,
   IN BOOLEAN                      IgnoreTextOutput,
   IN BOOLEAN                      SanitiseClearScreen,
   IN BOOLEAN                      ClearScreenOnModeSwitch,
   IN BOOLEAN                      ReplaceTabWithSpace
-  );
-
-VOID
-OcProvideUgaPassThrough (
-  VOID
   );
 
 #endif // OC_CONSOLE_LIB_INTERNAL_H

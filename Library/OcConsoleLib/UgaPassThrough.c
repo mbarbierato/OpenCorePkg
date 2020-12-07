@@ -53,17 +53,14 @@ OcUgaDrawGetMode (
     Info->PixelFormat
     ));
 
-  if (Info->HorizontalResolution == 0
-    || Info->VerticalResolution == 0
-    || (Info->PixelFormat != PixelRedGreenBlueReserved8BitPerColor
-      && Info->PixelFormat != PixelBlueGreenRedReserved8BitPerColor)) {
+  if (Info->HorizontalResolution == 0 || Info->VerticalResolution == 0) {
     return EFI_NOT_STARTED;
   }
 
   *HorizontalResolution = Info->HorizontalResolution;
   *VerticalResolution = Info->VerticalResolution;
-  *ColorDepth = 24;
-  *RefreshRate = 60;
+  *ColorDepth  = DEFAULT_COLOUR_DEPTH;
+  *RefreshRate = DEFAULT_REFRESH_RATE;
 
   return EFI_SUCCESS;
 }
@@ -152,7 +149,7 @@ OcUgaDrawBlt (
     );
 }
 
-VOID
+EFI_STATUS
 OcProvideUgaPassThrough (
   VOID
   )
@@ -166,7 +163,7 @@ OcProvideUgaPassThrough (
   OC_UGA_PROTOCOL                *OcUgaDraw;
 
   //
-  // For now we do not use this, but as a side note:
+  // For now we do not need this but for launching 10.4, but as a side note:
   // MacPro5,1 has 2 GOP protocols:
   // - for GPU
   // - for ConsoleOutput
@@ -251,4 +248,6 @@ OcProvideUgaPassThrough (
   } else {
     DEBUG ((DEBUG_INFO, "OCC: Failed to find handles with GOP\n"));
   }
+
+  return Status;
 }

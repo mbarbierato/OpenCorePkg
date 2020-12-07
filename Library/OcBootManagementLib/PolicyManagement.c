@@ -21,7 +21,7 @@
 #include <Guid/Gpt.h>
 #include <Guid/FileInfo.h>
 #include <Guid/GlobalVariable.h>
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 
 #include <Protocol/AppleBootPolicy.h>
 #include <Protocol/ApfsEfiBootRecordInfo.h>
@@ -32,6 +32,7 @@
 #include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
 #include <Library/DevicePathLib.h>
+#include <Library/MemoryAllocationLib.h>
 #include <Library/OcBootManagementLib.h>
 #include <Library/OcDevicePathLib.h>
 #include <Library/OcFileLib.h>
@@ -48,6 +49,9 @@ OcGetDevicePolicyType (
 {
   EFI_STATUS                Status;
   EFI_DEVICE_PATH_PROTOCOL  *DevicePath;
+  EFI_DEVICE_PATH_PROTOCOL  *DevicePathWalker;
+  ACPI_HID_DEVICE_PATH      *Acpi;
+  HARDDRIVE_DEVICE_PATH     *HardDrive;
   UINT8                     SubType;
 
   if (External != NULL) {
@@ -65,9 +69,10 @@ OcGetDevicePolicyType (
   // Currently we do not need it, but in future we may.
   //
 
-  while (!IsDevicePathEnd (DevicePath)) {
-    if (DevicePathType (DevicePath) == MESSAGING_DEVICE_PATH) {
-      SubType = DevicePathSubType (DevicePath);
+  DevicePathWalker = DevicePath;
+  while (!IsDevicePathEnd (DevicePathWalker)) {
+    if (DevicePathType (DevicePathWalker) == MESSAGING_DEVICE_PATH) {
+      SubType = DevicePathSubType (DevicePathWalker);
       switch (SubType) {
         case MSG_SATA_DP:
           return OC_SCAN_ALLOW_DEVICE_SATA;
@@ -75,9 +80,27 @@ OcGetDevicePolicyType (
           return OC_SCAN_ALLOW_DEVICE_SASEX;
         case MSG_SCSI_DP:
           return OC_SCAN_ALLOW_DEVICE_SCSI;
+        case MSG_APPLE_NVME_NAMESPACE_DP:
         case MSG_NVME_NAMESPACE_DP:
           return OC_SCAN_ALLOW_DEVICE_NVME;
         case MSG_ATAPI_DP:
+          //
+          // Check if this ATA Bus has HDD connected.
+          // DVD will have NO_DISK_SIGNATURE at least for our DuetPkg.
+          //
+          DevicePathWalker = NextDevicePathNode (DevicePathWalker);
+          HardDrive = (HARDDRIVE_DEVICE_PATH *) DevicePathWalker;
+          if (!IsDevicePathEnd (DevicePathWalker)
+            && DevicePathType (DevicePathWalker) == MEDIA_DEVICE_PATH
+            && DevicePathSubType (DevicePathWalker) == MEDIA_HARDDRIVE_DP
+            && (HardDrive->SignatureType == SIGNATURE_TYPE_MBR
+              || HardDrive->SignatureType == SIGNATURE_TYPE_GUID)) {
+            return OC_SCAN_ALLOW_DEVICE_ATAPI;
+          }
+
+          //
+          // Assume this is DVD/CD.
+          //
           if (External != NULL) {
             *External = TRUE;
           }
@@ -113,7 +136,38 @@ OcGetDevicePolicyType (
       break;
     }
 
-    DevicePath = NextDevicePathNode (DevicePath);
+    DevicePathWalker = NextDevicePathNode (DevicePathWalker);
+  }
+
+  DevicePathWalker = DevicePath;
+  while (!IsDevicePathEnd (DevicePathWalker)) {
+    if (DevicePathType (DevicePathWalker) == MEDIA_DEVICE_PATH) {
+      return OC_SCAN_ALLOW_DEVICE_PCI;
+    }
+
+    if (DevicePathType (DevicePathWalker) == ACPI_DEVICE_PATH) {
+      Acpi = (ACPI_HID_DEVICE_PATH *) DevicePathWalker;
+      if ((Acpi->HID & PNP_EISA_ID_MASK) == PNP_EISA_ID_CONST
+        && EISA_ID_TO_NUM (Acpi->HID) == 0x0A03) {
+        //
+        // Allow PciRoot.
+        //
+        DevicePathWalker = NextDevicePathNode (DevicePathWalker);
+        continue;
+      }
+    } else if (DevicePathType (DevicePathWalker) == HARDWARE_DEVICE_PATH
+      && DevicePathSubType (DevicePathWalker) == HW_PCI_DP) {
+      //
+      // Allow Pci.
+      //
+      DevicePathWalker = NextDevicePathNode (DevicePathWalker);
+      continue;
+    }
+
+    //
+    // Forbid everything else.
+    //
+    break;
   }
 
   return 0;
@@ -223,69 +277,50 @@ InternalCheckScanPolicy (
 OC_BOOT_ENTRY_TYPE
 OcGetBootDevicePathType (
   IN  EFI_DEVICE_PATH_PROTOCOL  *DevicePath,
-  OUT BOOLEAN                   *IsFolder  OPTIONAL
+  OUT BOOLEAN                   *IsFolder   OPTIONAL,
+  OUT BOOLEAN                   *IsGeneric  OPTIONAL
   )
 {
-  EFI_DEVICE_PATH_PROTOCOL    *CurrNode;
-  FILEPATH_DEVICE_PATH        *LastNode;
+  CHAR16                      *Path;
   UINTN                       PathLen;
   UINTN                       RestLen;
   UINTN                       Index;
-  INTN                        CmpResult;
-  OC_BOOT_ENTRY_TYPE          Type;
-  BOOLEAN                     Folder;
-  BOOLEAN                     Overflowed;
 
-  LastNode = NULL;
-  Type     = OC_BOOT_UNKNOWN;
-  Folder   = FALSE;
+  Path = NULL;
 
-  for (CurrNode = DevicePath; !IsDevicePathEnd (CurrNode); CurrNode = NextDevicePathNode (CurrNode)) {
-    if ((DevicePathType (CurrNode) == MEDIA_DEVICE_PATH)
-     && (DevicePathSubType (CurrNode) == MEDIA_FILEPATH_DP)) {
-      LastNode = (FILEPATH_DEVICE_PATH *) CurrNode;
-      PathLen  = OcFileDevicePathNameLen (LastNode);
-      if (PathLen == 0) {
-        continue;
-      }
-
-      //
-      // Only the trailer of the last (non-empty) FilePath node matters.
-      //
-      Folder = (LastNode->PathName[PathLen - 1] == L'\\');
-
-      //
-      // Detect macOS recovery by com.apple.recovery.boot in the bootloader path.
-      //
-      if (Type == OC_BOOT_UNKNOWN) {
-        Overflowed = OcOverflowSubUN (PathLen, L_STR_LEN (L"com.apple.recovery.boot"), &RestLen);
-        if (Overflowed) {
-          continue;
-        }
-
-        for (Index = 0; Index < RestLen; ++Index) {
-          CmpResult = CompareMem (
-            &LastNode->PathName[Index],
-            L"com.apple.recovery.boot",
-            L_STR_SIZE_NT (L"com.apple.recovery.boot")
-            );
-          if (CmpResult == 0) {
-            Type = OC_BOOT_APPLE_RECOVERY;
-            break;
-          }
-        }
-      }
-    } else {
-      Folder = FALSE;
-    }
+  if (IsGeneric != NULL) {
+    *IsGeneric = FALSE;
   }
 
   if (IsFolder != NULL) {
-    *IsFolder = Folder;
+    *IsFolder = FALSE;
   }
 
-  if (LastNode == NULL || Type != OC_BOOT_UNKNOWN) {
-    return Type;
+  Path = OcCopyDevicePathFullName (DevicePath, NULL);
+  if (Path == NULL) {
+    return OC_BOOT_UNKNOWN;
+  }
+
+  PathLen = StrLen (Path);
+
+  //
+  // Use the trailing character to determine folder.
+  //
+  if (IsFolder != NULL && Path[PathLen - 1] == L'\\') {
+    *IsFolder = TRUE;
+  }
+
+  //
+  // Detect macOS recovery by com.apple.recovery.boot in the bootloader path.
+  //
+  if (OcStrStrLength (Path, PathLen, L"com.apple.recovery.boot", L_STR_LEN (L"com.apple.recovery.boot")) != NULL) {
+    FreePool (Path);
+    return OC_BOOT_APPLE_RECOVERY;
+  }
+
+  if (OcStrStrLength (Path, PathLen, L"EFI\\APPLE", L_STR_LEN (L"EFI\\APPLE")) != NULL) {
+    FreePool (Path);
+    return OC_BOOT_APPLE_FW_UPDATE;
   }
 
   //
@@ -294,17 +329,20 @@ OcGetBootDevicePathType (
   //
   STATIC CONST CHAR16 *Bootloaders[] = {
     L"boot.efi",
-    L"tmbootpicker.efi"
+    L"tmbootpicker.efi",
+    L"bootmgfw.efi"
   };
 
   STATIC CONST UINTN BootloaderLengths[] = {
     L_STR_LEN (L"boot.efi"),
-    L_STR_LEN (L"tmbootpicker.efi")
+    L_STR_LEN (L"tmbootpicker.efi"),
+    L_STR_LEN (L"bootmgfw.efi")
   };
 
   STATIC CONST OC_BOOT_ENTRY_TYPE BootloaderTypes[] = {
     OC_BOOT_APPLE_OS,
-    OC_BOOT_APPLE_TIME_MACHINE
+    OC_BOOT_APPLE_TIME_MACHINE,
+    OC_BOOT_WINDOWS
   };
 
   for (Index = 0; Index < ARRAY_SIZE (Bootloaders); ++Index) {
@@ -313,15 +351,25 @@ OcGetBootDevicePathType (
     }
 
     RestLen = PathLen - BootloaderLengths[Index];
-    if ((RestLen == 0 || LastNode->PathName[RestLen - 1] == L'\\')
-      && CompareMem (
-        &LastNode->PathName[RestLen],
-        Bootloaders[Index],
-        BootloaderLengths[Index] * sizeof (LastNode->PathName[0])) == 0) {
+    if ((RestLen == 0 || Path[RestLen - 1] == L'\\')
+      && OcStrniCmp (&Path[RestLen], Bootloaders[Index], BootloaderLengths[Index]) == 0) {
+      FreePool (Path);
       return BootloaderTypes[Index];
     }
   }
 
+  CONST CHAR16 *GenericBootloader      = &EFI_REMOVABLE_MEDIA_FILE_NAME[L_STR_LEN (L"\\EFI\\BOOT\\")];
+  CONST UINTN  GenericBootloaderLength = L_STR_LEN (EFI_REMOVABLE_MEDIA_FILE_NAME) - L_STR_LEN (L"\\EFI\\BOOT\\");
+
+  if (IsGeneric != NULL && PathLen >= GenericBootloaderLength) {
+    RestLen = PathLen - GenericBootloaderLength;
+    if ((RestLen == 0 || Path[RestLen - 1] == L'\\')
+      && OcStrniCmp (&Path[RestLen], GenericBootloader, GenericBootloaderLength) == 0) {
+      *IsGeneric = TRUE;
+    }
+  }
+
+  FreePool (Path);
   return OC_BOOT_UNKNOWN;
 }
 
@@ -341,7 +389,7 @@ OcGetAppleBootLoadedImage (
 
   if (!EFI_ERROR (Status)
     && LoadedImage->FilePath != NULL
-    && (OcGetBootDevicePathType (LoadedImage->FilePath, NULL) & OC_BOOT_APPLE_ANY) != 0) {
+    && (OcGetBootDevicePathType (LoadedImage->FilePath, NULL, NULL) & OC_BOOT_APPLE_ANY) != 0) {
     return LoadedImage;
   }
 

@@ -18,12 +18,14 @@
 #include <Library/MemoryAllocationLib.h>
 #include <Library/OcApfsLib.h>
 #include <Library/OcAppleImageVerificationLib.h>
+#include <Library/OcAppleSecureBootLib.h>
 #include <Library/OcBootManagementLib.h>
 #include <Library/OcConsoleLib.h>
+#include <Library/OcDriverConnectionLib.h>
 #include <Library/OcGuardLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 #include <Protocol/ApfsUnsupportedBds.h>
 #include <Protocol/DevicePath.h>
 #include <Protocol/LoadedImage.h>
@@ -34,6 +36,8 @@ STATIC UINT64            mApfsMinimalVersion = OC_APFS_VERSION_DEFAULT;
 STATIC UINT32            mApfsMinimalDate    = OC_APFS_DATE_DEFAULT;
 STATIC UINT32            mOcScanPolicy;
 STATIC BOOLEAN           mIgnoreVerbose;
+STATIC BOOLEAN           mGlobalConnect;
+STATIC BOOLEAN           mDisconnectHandles;
 STATIC EFI_SYSTEM_TABLE  *mNullSystemTable;
 
 //
@@ -138,7 +142,7 @@ ApfsVerifyDriverVersion (
         ));
     }
   }
-  
+
   for (Index = 0; Index < ARRAY_SIZE (mApfsBlacklistedVersions); ++Index) {
     if (RealVersion == mApfsBlacklistedVersions[Index]) {
       DEBUG ((
@@ -237,6 +241,9 @@ ApfsStartDriver (
   EFI_DEVICE_PATH_PROTOCOL   *DevicePath;
   EFI_HANDLE                 ImageHandle;
   EFI_LOADED_IMAGE_PROTOCOL  *LoadedImage;
+  EFI_IMAGE_LOAD             LoadImage;
+  APPLE_SECURE_BOOT_PROTOCOL *SecureBoot;
+  UINT8                      Policy;
 
   Status = VerifyApplePeImageSignature (
     DriverBuffer,
@@ -270,8 +277,26 @@ ApfsStartDriver (
     DevicePath = NULL;
   }
 
+  SecureBoot = OcAppleSecureBootGetProtocol ();
+  ASSERT (SecureBoot != NULL);
+  Status = SecureBoot->GetPolicy (
+    SecureBoot,
+    &Policy
+    );
+  //
+  // Load directly when we have Apple Secure Boot.
+  // - Either normal.
+  // - Or during DMG loading.
+  //
+  if ((!EFI_ERROR (Status) && Policy != AppleImg4SbModeDisabled)
+    || (OcAppleSecureBootGetDmgLoading (&Policy) && Policy != AppleImg4SbModeDisabled)) {
+    LoadImage = OcImageLoaderLoad;
+  } else {
+    LoadImage = gBS->LoadImage;
+  }
+
   ImageHandle = NULL;
-  Status = gBS->LoadImage (
+  Status = LoadImage (
     FALSE,
     gImageHandle,
     DevicePath,
@@ -327,12 +352,41 @@ ApfsStartDriver (
     return Status;
   }
 
-  //
-  // Recursively connect controller to get apfs.efi loaded.
-  // We cannot use apfs.efi handle as it apparently creates new handles.
-  // This follows ApfsJumpStart driver implementation.
-  //
-  gBS->ConnectController (PrivateData->LocationInfo.ControllerHandle, NULL, NULL, TRUE);
+  DEBUG ((
+    DEBUG_INFO,
+    "OCJS: Connecting %a%a APFS driver on handle %p\n",
+    mGlobalConnect ? "globally" : "normally",
+    mDisconnectHandles ? " with disconnection" : "",
+    PrivateData->LocationInfo.ControllerHandle
+    ));
+
+  if (mDisconnectHandles) {
+    //
+    // Unblock handles as some types of firmware, such as that on the HP EliteBook 840 G2,
+    // may automatically lock all volumes without filesystem drivers upon
+    // any attempt to connect them.
+    // REF: https://github.com/acidanthera/bugtracker/issues/1128
+    //
+    OcDisconnectDriversOnHandle (PrivateData->LocationInfo.ControllerHandle);
+  }
+
+  if (mGlobalConnect) {
+    //
+    // Connect all devices when implicitly requested. This is a workaround
+    // for some older HP laptops, which for some reason fail to connect by both
+    // drive and partition handles.
+    // REF: https://github.com/acidanthera/bugtracker/issues/960
+    //
+    OcConnectDrivers ();
+  } else {
+    //
+    // Recursively connect controller to get apfs.efi loaded.
+    // We cannot use apfs.efi handle as it apparently creates new handles.
+    // This follows ApfsJumpStart driver implementation.
+    //
+    gBS->ConnectController (PrivateData->LocationInfo.ControllerHandle, NULL, NULL, TRUE);
+  }
+
   return EFI_SUCCESS;
 }
 
@@ -391,6 +445,8 @@ OcApfsConfigure (
   IN UINT64   MinVersion,
   IN UINT32   MinDate,
   IN UINT32   ScanPolicy,
+  IN BOOLEAN  GlobalConnect,
+  IN BOOLEAN  DisconnectHandles,
   IN BOOLEAN  IgnoreVerbose
   )
 {
@@ -413,13 +469,16 @@ OcApfsConfigure (
     mApfsMinimalDate = MinDate;
   }
 
-  mOcScanPolicy       = ScanPolicy;
-  mIgnoreVerbose      = IgnoreVerbose;
+  mOcScanPolicy      = ScanPolicy;
+  mIgnoreVerbose     = IgnoreVerbose;
+  mGlobalConnect     = GlobalConnect;
+  mDisconnectHandles = DisconnectHandles;
 }
 
 EFI_STATUS
 OcApfsConnectDevice (
-  IN EFI_HANDLE  Handle
+  IN EFI_HANDLE  Handle,
+  IN BOOLEAN     VerifyPolicy
   )
 {
   EFI_STATUS             Status;
@@ -437,6 +496,7 @@ OcApfsConnectDevice (
     &TempProtocol
     );
   if (!EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_VERBOSE, "OCJS: FS already connected\n"));
     return EFI_ALREADY_STARTED;
   }
 
@@ -450,6 +510,7 @@ OcApfsConnectDevice (
     (VOID **) &BlockIo
     );
   if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_INFO, "OCJS: Cannot connect, BlockIo error - %r\n", Status));
     return EFI_UNSUPPORTED;
   }
 
@@ -460,18 +521,30 @@ OcApfsConnectDevice (
   // - Which have non-POT block size.
   //
   if (BlockIo->Media == NULL
-    || !BlockIo->Media->LogicalPartition
-    || BlockIo->Media->BlockSize == 0
+    || !BlockIo->Media->LogicalPartition) {
+    return EFI_UNSUPPORTED;
+  }
+
+  if (BlockIo->Media->BlockSize == 0
     || (BlockIo->Media->BlockSize & (BlockIo->Media->BlockSize - 1)) != 0) {
+    DEBUG ((
+      DEBUG_INFO,
+      "OCJS: Cannot connect, BlockIo malformed: %d %u\n",
+      BlockIo->Media->LogicalPartition,
+      BlockIo->Media->BlockSize
+      ));
     return EFI_UNSUPPORTED;
   }
 
   //
   // Filter out handles, which do not respect OpenCore policy.
   //
-  Status = ApfsCheckOpenCoreScanPolicy (Handle);
-  if (EFI_ERROR (Status)) {
-    return Status;
+  if (VerifyPolicy) {
+    Status = ApfsCheckOpenCoreScanPolicy (Handle);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_INFO, "OCJS: Cannot connect, Policy error - %r\n", Status));
+      return Status;
+    }
   }
 
   //
@@ -484,6 +557,7 @@ OcApfsConnectDevice (
     &TempProtocol
     );
   if (!EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_INFO, "OCJS: Cannot connect, unsupported BDS\n"));
     return EFI_UNSUPPORTED;
   }
 
@@ -497,6 +571,7 @@ OcApfsConnectDevice (
     &TempProtocol
     );
   if (!EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_INFO, "OCJS: Cannot connect, already handled\n"));
     return EFI_UNSUPPORTED;
   }
 

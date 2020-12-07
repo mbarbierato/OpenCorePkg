@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 
 #include <OpenCore.h>
 
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 
 #include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
@@ -108,15 +108,7 @@ OcProcessVariableGuid (
   EFI_STATUS  Status;
   UINT32      GuidIndex;
 
-  //
-  // FIXME: Checking string length manually is due to inadequate assertions.
-  //
-  if (AsciiStrLen (AsciiVariableGuid) == GUID_STRING_LENGTH) {
-    Status = AsciiStrToGuid (AsciiVariableGuid, VariableGuid);
-  } else {
-    Status = EFI_BUFFER_TOO_SMALL;
-  }
-
+  Status = AsciiStrToGuid (AsciiVariableGuid, VariableGuid);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_WARN, "OC: Failed to convert NVRAM GUID %a - %r\n", AsciiVariableGuid, Status));
   }
@@ -251,7 +243,7 @@ OcSetNvramVariable (
       VariableData
       );
     DEBUG ((
-      EFI_ERROR (Status) ? DEBUG_WARN : DEBUG_INFO,
+      EFI_ERROR (Status) && VariableSize > 0 ? DEBUG_WARN : DEBUG_INFO,
       "OC: Setting NVRAM %g:%a - %r\n",
       VariableGuid,
       AsciiVariableName,
@@ -344,14 +336,14 @@ OcLoadLegacyNvram (
 
 STATIC
 VOID
-OcBlockNvram (
+OcDeleteNvram (
   IN OC_GLOBAL_CONFIG    *Config
   )
 {
   EFI_STATUS    Status;
-  UINT32        BlockGuidIndex;
+  UINT32        DeleteGuidIndex;
   UINT32        AddGuidIndex;
-  UINT32        BlockVariableIndex;
+  UINT32        DeleteVariableIndex;
   UINT32        AddVariableIndex;
   CONST CHAR8   *AsciiVariableName;
   CHAR16        *UnicodeVariableName;
@@ -361,9 +353,9 @@ OcBlockNvram (
   UINTN         CurrentValueSize;
   BOOLEAN       SameContents;
 
-  for (BlockGuidIndex = 0; BlockGuidIndex < Config->Nvram.Block.Count; ++BlockGuidIndex) {
+  for (DeleteGuidIndex = 0; DeleteGuidIndex < Config->Nvram.Delete.Count; ++DeleteGuidIndex) {
     Status = OcProcessVariableGuid (
-      OC_BLOB_GET (Config->Nvram.Block.Keys[BlockGuidIndex]),
+      OC_BLOB_GET (Config->Nvram.Delete.Keys[DeleteGuidIndex]),
       &VariableGuid,
       NULL,
       NULL
@@ -381,14 +373,23 @@ OcBlockNvram (
     //
     for (AddGuidIndex = 0; AddGuidIndex < Config->Nvram.Add.Count; ++AddGuidIndex) {
       if (AsciiStrCmp (
-        OC_BLOB_GET (Config->Nvram.Block.Keys[BlockGuidIndex]),
+        OC_BLOB_GET (Config->Nvram.Delete.Keys[DeleteGuidIndex]),
         OC_BLOB_GET (Config->Nvram.Add.Keys[AddGuidIndex])) == 0) {
         break;
       }
     }
 
-    for (BlockVariableIndex = 0; BlockVariableIndex < Config->Nvram.Block.Values[BlockGuidIndex]->Count; ++BlockVariableIndex) {
-      AsciiVariableName   = OC_BLOB_GET (Config->Nvram.Block.Values[BlockGuidIndex]->Values[BlockVariableIndex]);
+    for (DeleteVariableIndex = 0; DeleteVariableIndex < Config->Nvram.Delete.Values[DeleteGuidIndex]->Count; ++DeleteVariableIndex) {
+      AsciiVariableName   = OC_BLOB_GET (Config->Nvram.Delete.Values[DeleteGuidIndex]->Values[DeleteVariableIndex]);
+
+      //
+      // '#' is filtered in all keys, but for values we need to do it ourselves.
+      //
+      if (AsciiVariableName[0] == '#') {
+        DEBUG ((DEBUG_INFO, "OC: Variable skip deleting %a\n", AsciiVariableName));
+        continue;
+      }
+
       UnicodeVariableName = AsciiStrCopyToUnicode (AsciiVariableName, 0);
 
       if (UnicodeVariableName == NULL) {
@@ -412,6 +413,8 @@ OcBlockNvram (
             SameContents = CurrentValueSize == VariableMap->Values[AddVariableIndex]->Size
               && CompareMem (OC_BLOB_GET (VariableMap->Values[AddVariableIndex]), CurrentValue, CurrentValueSize) == 0;
             FreePool (CurrentValue);
+          } else if (Status == EFI_NOT_FOUND && VariableMap->Values[AddVariableIndex]->Size == 0) {
+            SameContents = TRUE;
           } else {
             SameContents = FALSE;
           }
@@ -488,7 +491,7 @@ OcLoadNvramSupport (
     OcLoadLegacyNvram (Storage->FileSystem, Config);
   }
 
-  OcBlockNvram (Config);
+  OcDeleteNvram (Config);
 
   OcAddNvram (Config);
 

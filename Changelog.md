@@ -1,6 +1,192 @@
 OpenCore Changelog
 ==================
 
+#### v0.6.4
+- Added `BlacklistAppleUpdate` to fix macOS 11 broken update optout
+- Dropped HII services from OpenDuet improving size and performance
+- Fixed patching of injected kexts in mkext
+- Added support for launching from relative paths
+- Added direct path passing for tools via `RealPath`
+- Allowed launching tools and entries in text mode via `TextMode`
+- Updated builtin firmware versions for SMBIOS and the rest
+- Fixed ACPI patches not applying if tables are in locked memory
+- Fixed `EnableSafeModeSlide` on macOS 11
+- Added `AllowRelocationBlock` quirk for older macOS and safe mode
+- Fixed CPU frequency calculation on AMD 19h family
+- Updated recovery_urls
+
+#### v0.6.3
+- Added support for xml comments in plist files
+- Updated underlying EDK II package to edk2-stable202008
+- Provide fallbacks for NULL memory SMBIOS strings
+- Fixed `BOOTx64.efi` and `BOOTIA32.efi` convention
+- Fixed SMBIOS handling with multiple memory arrays
+- Fixed memory array handle assignment on empty slots
+- Fixed CPUID patching on certain versions of macOS 10.4.10 and 10.4.11
+- Fixed incorrect core/thread counts on Pentium M processors
+- Added `SSDT-UNC.dsl` ACPI sample to resolve X99 issues, thx @RemB
+- Updated builtin firmware versions for SMBIOS and the rest
+- Increased slide allocation reserve to 200 MB for Big Sur beta 10
+- Fixed assert when trying to enable direct renderer on blit-only GOP
+- Added support for custom memory properties
+- Fixed intermittent 32-bit prelinking failures caused by improper Mach-O expansion
+- Fixed failures in cacheless injection dependency resolution
+- Fixed detection issues with older Atom CPUs
+- Fixed `ScanPolicy` NVMe handling on MacPro5,1
+- Fixed I/O issues on platforms incapable of reading over 1MB at once
+- Fixed plist-only kext injection in Big Sur
+- Add `ForceResolution` option for enabling non-default resolutions
+- Fixed Ps2MouseDxe not properly loading under OpenDuetPkg
+- Added workaround for read-only errors on some X299 boards
+- Added support for `x86legacy` Secure Boot model
+- Added missing Secure Boot NVRAM variables required by 11.0
+- Added setting of `system-id` NVRAM variable
+- Added `ForceSecureBootScheme` quirk for virtual machines
+- Fixed kernel and ACPI patches failing to replace last bytes of memory
+
+#### v0.6.2
+- Updated builtin firmware versions for SMBIOS and the rest
+- Added `ProcessorType` option to `Generic` allowing custom CPU names
+- Fixed `UnblockFsConnect` option not working with APFS JumpStart
+- Added IA32 binary variant to the release bundles
+- Fixed improper handling of cacheless kexts without an Info.plist
+- Fixed improper calculation of kext startup address for blocking
+- Added mkext 32-bit kext injection (10.4-10.6)
+- Added cacheless 32-bit kext injection (10.4-10.7)
+- Added 32-bit kernel/kext patching/blocking support
+- Fixed issues loading 10.7 EfiBoot
+- Added `Type` to `ReservedMemory` to fulfil hibernation hack needs
+- Added workaround to displaying `Preboot` instead of `Macintosh HD`
+- Added prelinkedkernel 32-bit kext injection (10.6-10.7)
+- Added `SystemMemoryStatus` to override memory replacement on some models
+- Added older Pentium CPU recognition in SMBIOS
+- Added `ExtendBTFeatureFlags` to properly set `FeatureFlags` for Bluetooth (which substitutes BT4LEContinuityFixup)
+- Added `MinKernel`/`MaxKernel` to CPUID emulation and `DummyPowerManagement`
+- Fixed `-legacy` not being added in `KernelArch` `Auto` mode
+- Fixed `i386-user32` not forcing `i386` on macOS 10.7 on X64 firmware
+- Fixed `i386-user32` being incorrectly enabled in macOS 10.4, 10.5, and 10.7
+- Disabled prelinked boot for macOS 10.4 and 10.5 in `KernelCache` `Auto` mode
+- Fixed `macserial` compatibility with iMac20,x serials and other models from 2020
+- Added `LegacyCommpage` quirk to improve pre-SSSE3 userspace compatibility
+- Fixed legacy SATA HDDs displaying as external drives in the picker
+
+#### v0.6.1
+- Improved recognition of early pressed hotkeys, thx @varahash
+- Made DMG loading support configurable via `DmgLoading`
+- Added iMac20,1 and iMac20,2 model codes
+- Fixed display name for older Xeon CPUs like Xeon E5450
+- Added Comet Lake-LP HDA device code
+- Fixed OS boot selection on SATA controllers with legacy OPROMs
+- Fixed RSDP ACPI table checksum recalculation
+- Added immutablekernel loading support for 10.13+
+- Fixed solving some symbols to zero in 11.0 kext inject
+- Reduced OpenCanopy size by restricting boot management access
+- Added `BuiltinText` variant for `TextRenderer` for older laptops
+- Fixed `SyncRuntimePermissions` creating invalid MAT table
+- Added EFI FAT image loading support (macOS 10.8 and earlier)
+- Added 64-bit cacheless kext injection and patching support (macOS 10.9 and earlier)
+- Added 64-bit mkext kext injection and patching support (macOS 10.6 and earlier)
+- Fixed XNU hook matching non-kernel files
+- Updated builtin firmware versions for SMBIOS and the rest
+- Fixed patching of ACPI tables in low memory
+- Fixed macOS 11.0 DMG recovery loading without hotplug
+- Fixed `XhciPortLimit` quirk on 10.12.6 and possibly other versions
+- Fixed `IncreasePciBarSize` quirk on 10.11.5 and possibly other versions
+- Fixed `LapicKernelPanic` quirk on 10.8.5 and possibly other versions
+- Fixed hard-lock caused by EHCI SMI in OpenDuetPkg
+- Added preview UEFI Secure Boot compatibility
+- Added `FuzzyMatch` option to support fuzzy kernelcache matching on 10.6 and earlier
+- Added `KernelArch` option to specify architecture preference on older kernels
+- Added `KernelCache` option to specify kernel caching preference for older kernels
+- Added `Force` section to provide support for injecting drivers in older macOS
+- Changed kernel driver injection to happen prior to kernel driver patching
+- Added `Arch` filtering option to `Add`, `Block`, `Force`, and `Patch` sections
+- Added `DisableLinkeditJettison` quirk to workaround 11.0b5 kernel panics
+- Added debugging of missing fields in the configuration
+
+#### v0.6.0
+- Fixed sound corruption with AudioDxe
+- Fixed icon choice for Apple FW update in OpenCanopy
+- Fixed APFS driver loading on Fusion Drive
+- Added Comet Lake HDA device code
+- Fixed audio stream position reporting on non-Intel platforms
+- Added `Firmware` mode to `ResetSystem` to reboot into preferences
+- Replaced `BlacklistAppleUpdate` with `run-efi-updater` NVRAM variable
+- Fixed reset value and detection in `FadtEnableReset` ACPI quirk
+- Fixed freezes during boot option expansion with PXE boot entries
+- Updated underlying EDK II package to edk2-stable202005
+- Added `ProvideMaxSlide` quirk to improve laptop stability, thx @zhen-zen
+- Fixed slide choice on platforms when 0 slide is unavailable, thx @zhen-zen
+- Fixed assertions caused by unaligned file path access in DEBUG builds
+- Renamed `ConfigValidity` utility to `ocvalidate` for consistency
+- Added `GlobalConnect` for APFS loading to workaround older firmware issues
+- Added 11.0 support for `AvoidRuntimeDefrag` Booter quirk
+- Fixed 11.0 lapic kernel quirk as of DP1
+- Improved boot selection scripts for macOS without NVRAM
+- Added UGA protocol compatibility in `ProvideConsoleGop` quirk
+- Added `UgaPassThrough` option to support UGA protocol over GOP
+- Added `AppleFramebufferInfo` protocol implementation and override
+- Fixed serial initialisation when file logging is disabled
+- Fixed FSBFrequency reporting on Meron and similar CPUs
+- Fixed incorrect volume icon dimension requirements in OpenCanopy
+- Added preview version of KernelCollection injection code
+- Fixed ACPI reset register detection in DxeIpl
+- Added MacBookPro16,4 model code
+- Updated builtin firmware versions for SMBIOS and the rest
+- Fixed OSXSAVE reporting when emulating CPUID on newer CPUs
+- Added `SerialInit` option to perform serial initialisation separately
+- Fixed OpenDuetPkg booting on Intel G33 with SATA controller in RAID mode
+- `PlatformInfo` `Automatic` for all models
+- Fixed 32-bit OpenDuetPkg booting on machines with over 4 GBs of RAM
+- Fixed delays with OpenDuetPkg booting with certain SATA controllers in IDE mode
+- Fixed display name for some high core count i9 CPUs like 7920X
+- Fixed SSDT-EC-USBX
+
+#### v0.5.9
+- Added full HiDPI support in OpenCanopy
+- Improved OpenCanopy font rendering by using CoreText
+- Fixed light and custom background font rendering
+- Added `Boot####` options support in boot entry listing
+- Removed `HideSelf` by pattern recognising `BOOTx64.efi`
+- Added `BlacklistAppleUpdate` to avoid Apple FW updates
+- Fixed accidental tool and NVRAM reset booting by default
+- Fixed unrecognised select `com.apple.recovery.boot` entries
+- Changed NVRAM reset not to erase `BootProtect` boot options
+- Improved boot performance when picker UI is disabled
+- Enforced the use of builtin picker when external fails
+- Fixed warnings for empty NVRAM variables (e.g. rtc-blacklist)
+- Added `ApplePanic` to store panic logs on ESP root
+- Fixed `ReconnectOnResChange` reconnecting even without res change
+- Fixed OpenCanopy showing internal icons for external drives
+- Fixed OpenCanopy launching Shell with text over it
+- Added partial hotkey support to OpenCanopy (e.g. Ctrl+Enter)
+- Added builtin text renderer compatibility with Shell page mode
+- Fixed `FadtEnableReset` with too small FACP tables and some laptops
+- Fixed CPU detection crash with QEMU 5.0 and KVM accelerator
+- Removed `RequestBootVarFallback` due to numerous bugs
+- Added `DeduplicateBootOrder` UEFI quirk
+- Removed `DirectGopCacheMode` due to being ineffective
+- Fixed assertions on log exhaustion causing boot failures
+- Fixed builtin text renderer failing to provide ConsoleControl
+- Fixed compatibility with blit-only GOP (e.g. OVMF Bochs)
+- Fixed ignoring `#` in DeviceProperty and NVRAM `Delete`
+- Renamed `Block` to `Delete` in `ACPI`,`DeviceProperties`, and `NVRAM`
+- Added MacBookPro16,2 and MacBookPro16,3 model codes
+- Added PCI device scanning policy support (e.g. VIRTIO)
+- Improved playback performance in AudioDxe
+- Updated builtin firmware versions for SMBIOS and the rest
+- Added improved CPU type detection for newer CPU types
+- Added ConfigValidity utility and improved config validation
+- Added serial port initialisation for serial debug logging
+- Disabled empty debug log file creation to avoid ESP cluttering
+- Added `TscSyncTimeout` quirk to workaround debug kernel assertions
+- Added first-class Windows support to bless model
+- Fixed `LapicKernelPanic` kernel quirk on 10.9
+- Added prebuilt version of `CrScreenshotDxe` driver
+- Fixed Hyper-V frequency detection compatibility
+- Added `SysReport` option for DEBUG builds to dump system info
+- Fixed crashes on some AMD firmware when performing keyboard input
+
 #### v0.5.8
 - Fixed invalid CPU object reference in SSDT-PLUG
 - Fixed incorrect utilities and resources packaging
@@ -57,8 +243,8 @@ OpenCore Changelog
 
 #### v0.5.6
 - Various improvements to builtin text renderer
-- Fixed locating DMG recovery in APTIO IV firmwares on FAT32
-- Fixed loading DMG recovery in APTIO IV firmwares on FAT32
+- Fixed locating DMG recovery in APTIO IV firmware on FAT32
+- Fixed loading DMG recovery in APTIO IV firmware on FAT32
 - Removed `AvoidHighAlloc` quirk due to removed I/O over 4GB
 - Moved `ConsoleMode`, `Resolution` options to `Output` section
 - Moved console-related UEFI quirks to `Output` section
@@ -76,7 +262,7 @@ OpenCore Changelog
 - Added `HideAuxiliary` and `Auxiliary` options
 - Fixed picker timeout and log timestamps for VMware
 - Fixed NULL parent DeviceHandle for launched tools
-- Added bundled HiiDatabase driver for very old firmwares
+- Added bundled HiiDatabase driver for very old firmware
 - Added SSE2 support in memory intrinsics for better performance
 - Improved ACPI PM timer CPU frequency calculation performance
 - Improved LapicKernelPanic compatibility with newer macOS versions

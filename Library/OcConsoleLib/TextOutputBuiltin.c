@@ -21,6 +21,7 @@
 #include <Library/DebugLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/OcConsoleLib.h>
+#include <Library/OcMiscLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Protocol/ConsoleControl.h>
@@ -161,6 +162,8 @@ STATIC UINTN  mConsoleWidth;
 STATIC UINTN  mConsoleHeight;
 STATIC UINTN  mConsoleMaxPosX;
 STATIC UINTN  mConsoleMaxPosY;
+STATIC UINTN  mPrivateColumn; ///< At least UEFI Shell trashes Mode values.
+STATIC UINTN  mPrivateRow;    ///< At least UEFI Shell trashes Mode values.
 STATIC UINT32 mConsoleGopMode;
 STATIC UINT8  mFontScale;
 STATIC EFI_GRAPHICS_OUTPUT_BLT_PIXEL_UNION mBackgroundColor;
@@ -203,7 +206,7 @@ RenderChar (
 
   DstBuffer = &mCharacterBuffer[0].Raw;
 
-  if ((Char >= 0 && Char < ISO_CHAR_MIN) || Char == ' ' || Char == '\t' || Char == 0x7F) {
+  if ((Char >= 0 && Char < ISO_CHAR_MIN) || Char == ' ' || Char == CHAR_TAB || Char == 0x7F) {
     SetMem32 (DstBuffer, TGT_CHAR_AREA * sizeof (DstBuffer[0]), mBackgroundColor.Raw);
   } else {
 
@@ -364,24 +367,7 @@ RenderResync (
 
   if (Info->HorizontalResolution < TGT_CHAR_WIDTH * 3
     || Info->VerticalResolution < TGT_CHAR_HEIGHT * 3) {
-    return EFI_DEVICE_ERROR;
-  }
-
-  if (Info->PixelFormat != PixelRedGreenBlueReserved8BitPerColor
-    && Info->PixelFormat != PixelBlueGreenRedReserved8BitPerColor) {
-    //
-    // DuetPkg may report bit mask image output.
-    //
-    if (Info->PixelFormat != PixelBitMask) {
-      return EFI_DEVICE_ERROR;
-    }
-
-    if (Info->PixelInformation.RedMask != 0xFF000000U
-      && Info->PixelInformation.RedMask != 0xFF0000U
-      && Info->PixelInformation.RedMask != 0xFF00U
-      && Info->PixelInformation.RedMask != 0xFFU) {
-      return EFI_DEVICE_ERROR;
-    }
+    return EFI_LOAD_ERROR;
   }
 
   if (mCharacterBuffer != NULL) {
@@ -390,7 +376,7 @@ RenderResync (
 
   mCharacterBuffer = AllocatePool (TGT_CHAR_AREA * sizeof (mCharacterBuffer[0]));
   if (mCharacterBuffer == NULL) {
-    return EFI_DEVICE_ERROR;
+    return EFI_OUT_OF_RESOURCES;
   }
 
   mConsoleGopMode          = mGraphicsOutput->Mode->Mode;
@@ -399,8 +385,8 @@ RenderResync (
   mConsoleMaxPosX          = 0;
   mConsoleMaxPosY          = 0;
 
-  This->Mode->CursorColumn = 0;
-  This->Mode->CursorRow    = 0;
+  mPrivateColumn = mPrivateRow = 0;
+  This->Mode->CursorColumn = This->Mode->CursorRow = 0;
 
   mGraphicsOutput->Blt (
     mGraphicsOutput,
@@ -420,9 +406,10 @@ RenderResync (
 STATIC
 EFI_STATUS
 EFIAPI
-AsciiTextReset (
+AsciiTextResetEx (
   IN EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This,
-  IN BOOLEAN                         ExtendedVerification
+  IN BOOLEAN                         ExtendedVerification,
+  IN BOOLEAN                         Debug
   )
 {
   EFI_STATUS                            Status;
@@ -430,7 +417,7 @@ AsciiTextReset (
 
   OldTpl = gBS->RaiseTPL (TPL_NOTIFY);
 
-  Status = gBS->HandleProtocol (
+  Status = OcHandleProtocolFallback (
     gST->ConsoleOutHandle,
     &gEfiGraphicsOutputProtocolGuid,
     (VOID **) &mGraphicsOutput
@@ -438,6 +425,11 @@ AsciiTextReset (
 
   if (EFI_ERROR (Status)) {
     gBS->RestoreTPL (OldTpl);
+    if (Debug) {
+      DEBUG ((DEBUG_INFO, "OCC: ASCII Text Reset [HandleProtocolFallback] - %r\n", Status));
+      return Status;
+    }
+
     return EFI_DEVICE_ERROR;
   }
 
@@ -447,13 +439,31 @@ AsciiTextReset (
   mForegroundColor.Raw     = mGraphicsEfiColors[ARRAY_SIZE (mGraphicsEfiColors) / 2 - 1];
 
   Status = RenderResync (This);
+  gBS->RestoreTPL (OldTpl);
   if (EFI_ERROR (Status)) {
-    gBS->RestoreTPL (OldTpl);
-    return Status;
+    if (Debug) {
+      DEBUG ((DEBUG_INFO, "OCC: ASCII Text Reset [RenderResync] - %r\n", Status));
+      return Status;
+    }
+
+    return EFI_DEVICE_ERROR;
   }
 
-  gBS->RestoreTPL (OldTpl);
   return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+AsciiTextReset (
+  IN EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This,
+  IN BOOLEAN                         ExtendedVerification
+  )
+{
+  EFI_STATUS                            Status;
+
+  Status = AsciiTextResetEx (This, ExtendedVerification, FALSE);
+  return Status;
 }
 
 STATIC
@@ -484,21 +494,15 @@ AsciiTextOutputString (
     Status = RenderResync (This);
     if (EFI_ERROR (Status)) {
       gBS->RestoreTPL (OldTpl);
-      return Status;
+      return EFI_DEVICE_ERROR;
     }
   }
 
   //
-  // We cannot assert here and these values should not but may be trashed by the user,
-  // so we do sanity checks in runtime.
+  // For whatever reason UEFI Shell trashes these values when executing commands like help -b.
   //
-  if (This->Mode->CursorColumn < 0 || (UINTN) This->Mode->CursorColumn >= mConsoleWidth) {
-    This->Mode->CursorColumn = 0;
-  }
-
-  if (This->Mode->CursorRow < 0 || (UINTN) This->Mode->CursorRow >= mConsoleHeight) {
-    This->Mode->CursorRow = 0;
-  }
+  This->Mode->CursorColumn = (INT32) mPrivateColumn;
+  This->Mode->CursorRow    = (INT32) mPrivateRow;
 
   FlushCursor (This->Mode->CursorVisible, This->Mode->CursorColumn, This->Mode->CursorRow);
 
@@ -506,8 +510,20 @@ AsciiTextOutputString (
     //
     // Carriage return should just move the cursor back.
     //
-    if (String[Index] == '\r') {
+    if (String[Index] == CHAR_CARRIAGE_RETURN) {
       This->Mode->CursorColumn = 0;
+      continue;
+    }
+
+    if (String[Index] == CHAR_BACKSPACE) {
+      if (This->Mode->CursorColumn == 0 && This->Mode->CursorRow > 0) {
+        This->Mode->CursorRow--;
+        This->Mode->CursorColumn = (INT32) (mConsoleWidth - 1);
+        RenderChar (' ', This->Mode->CursorColumn, This->Mode->CursorRow);
+      } else if (This->Mode->CursorColumn > 0) {
+        This->Mode->CursorColumn--;
+        RenderChar (' ', This->Mode->CursorColumn, This->Mode->CursorRow);
+      }
       continue;
     }
 
@@ -515,7 +531,7 @@ AsciiTextOutputString (
     // Newline should move the cursor lower.
     // In case we are out of room it should scroll instead.
     //
-    if (String[Index] == '\n') {
+    if (String[Index] == CHAR_LINEFEED) {
       if ((UINTN) This->Mode->CursorRow < mConsoleHeight - 1) {
         ++This->Mode->CursorRow;
         mConsoleMaxPosY = MAX (mConsoleMaxPosY, (UINTN) This->Mode->CursorRow);
@@ -553,6 +569,9 @@ AsciiTextOutputString (
 
   FlushCursor (This->Mode->CursorVisible, This->Mode->CursorColumn, This->Mode->CursorRow);
 
+  mPrivateColumn = (UINTN) This->Mode->CursorColumn;
+  mPrivateRow    = (UINTN) This->Mode->CursorRow;
+
   gBS->RestoreTPL (OldTpl);
 
   return EFI_SUCCESS;
@@ -566,10 +585,12 @@ AsciiTextTestString (
   IN CHAR16                          *String
   )
 {
-  if (StrCmp (String, OC_CONSOLE_CLEAR_AND_CLIP) == 0) {
-    This->ClearScreen (This);
+  if (StrCmp (String, OC_CONSOLE_MARK_UNCONTROLLED) == 0) {
+    mConsoleMaxPosX = mGraphicsOutput->Mode->Info->HorizontalResolution / TGT_CHAR_WIDTH;
+    mConsoleMaxPosY = mGraphicsOutput->Mode->Info->VerticalResolution   / TGT_CHAR_HEIGHT;
+  } else if (StrCmp (String, OC_CONSOLE_MARK_CONTROLLED) == 0) {
     mConsoleMaxPosX = 0;
-    mConsoleMaxPosY = 0;
+    mConsoleMaxPosX = 0;
   }
 
   return EFI_SUCCESS;
@@ -594,7 +615,7 @@ AsciiTextQueryMode (
     Status = RenderResync (This);
     if (EFI_ERROR (Status)) {
       gBS->RestoreTPL (OldTpl);
-      return Status;
+      return EFI_DEVICE_ERROR;
     }
   }
 
@@ -631,7 +652,7 @@ AsciiTextSetMode (
     Status = RenderResync (This);
     gBS->RestoreTPL (OldTpl);
     if (EFI_ERROR (Status)) {
-      return Status;
+      return EFI_DEVICE_ERROR;
     }
   }
 
@@ -661,15 +682,15 @@ AsciiTextSetAttribute (
     Status = RenderResync (This);
     if (EFI_ERROR (Status)) {
       gBS->RestoreTPL (OldTpl);
-      return Status;
+      return EFI_DEVICE_ERROR;
     }
   }
 
   if (Attribute != (UINTN) This->Mode->Attribute) {
-    FlushCursor (This->Mode->CursorVisible, This->Mode->CursorColumn, This->Mode->CursorRow);
+    FlushCursor (This->Mode->CursorVisible, mPrivateColumn, mPrivateRow);
 
-    FgColor = BitFieldRead32 (Attribute, 0, 3);
-    BgColor = BitFieldRead32 (Attribute, 4, 6);
+    FgColor = BitFieldRead32 ((UINT32) Attribute, 0, 3);
+    BgColor = BitFieldRead32 ((UINT32) Attribute, 4, 6);
 
     //
     // Once we change the background we should redraw everything.
@@ -681,9 +702,9 @@ AsciiTextSetAttribute (
 
     mForegroundColor.Raw  = mGraphicsEfiColors[FgColor];
     mBackgroundColor.Raw  = mGraphicsEfiColors[BgColor];
-    This->Mode->Attribute = Attribute;
+    This->Mode->Attribute = (UINT32) Attribute;
 
-    FlushCursor (This->Mode->CursorVisible, This->Mode->CursorColumn, This->Mode->CursorRow);
+    FlushCursor (This->Mode->CursorVisible, mPrivateColumn, mPrivateRow);
   }
 
   gBS->RestoreTPL (OldTpl);
@@ -708,7 +729,7 @@ AsciiTextClearScreen (
     Status = RenderResync (This);
     if (EFI_ERROR (Status)) {
       gBS->RestoreTPL (OldTpl);
-      return Status;
+      return EFI_DEVICE_ERROR;
     }
   }
 
@@ -736,9 +757,9 @@ AsciiTextClearScreen (
   //
   // Handle cursor.
   //
-  This->Mode->CursorColumn  = 0;
-  This->Mode->CursorRow     = 0;
-  FlushCursor (This->Mode->CursorVisible, This->Mode->CursorColumn, This->Mode->CursorRow);
+  mPrivateColumn = mPrivateRow = 0;
+  This->Mode->CursorColumn  = This->Mode->CursorRow = 0;
+  FlushCursor (This->Mode->CursorVisible, mPrivateColumn, mPrivateRow);
 
   //
   // We do not reset max here, as we may still scroll (e.g. in shell via page buttons).
@@ -766,15 +787,17 @@ AsciiTextSetCursorPosition (
     Status = RenderResync (This);
     if (EFI_ERROR (Status)) {
       gBS->RestoreTPL (OldTpl);
-      return Status;
+      return EFI_DEVICE_ERROR;
     }
   }
 
   if (Column < mConsoleWidth && Row < mConsoleHeight) {
-    FlushCursor (This->Mode->CursorVisible, This->Mode->CursorColumn, This->Mode->CursorRow);
-    This->Mode->CursorColumn = (INT32) Column;
-    This->Mode->CursorRow    = (INT32) Row;
-    FlushCursor (This->Mode->CursorVisible, This->Mode->CursorColumn, This->Mode->CursorRow);
+    FlushCursor (This->Mode->CursorVisible, mPrivateColumn, mPrivateRow);
+    mPrivateColumn = Column;
+    mPrivateRow    = Row;
+    This->Mode->CursorColumn = (INT32) mPrivateColumn;
+    This->Mode->CursorRow    = (INT32) mPrivateRow;
+    FlushCursor (This->Mode->CursorVisible, mPrivateColumn, mPrivateRow);
     mConsoleMaxPosX = MAX (mConsoleMaxPosX, Column);
     mConsoleMaxPosY = MAX (mConsoleMaxPosY, Row);
     Status = EFI_SUCCESS;
@@ -803,13 +826,13 @@ AsciiTextEnableCursor (
     Status = RenderResync (This);
     if (EFI_ERROR (Status)) {
       gBS->RestoreTPL (OldTpl);
-      return Status;
+      return EFI_DEVICE_ERROR;
     }
   }
 
-  FlushCursor (This->Mode->CursorVisible, This->Mode->CursorColumn, This->Mode->CursorRow);
+  FlushCursor (This->Mode->CursorVisible, mPrivateColumn, mPrivateRow);
   This->Mode->CursorVisible = Visible;
-  FlushCursor (This->Mode->CursorVisible, This->Mode->CursorColumn, This->Mode->CursorRow);
+  FlushCursor (This->Mode->CursorVisible, mPrivateColumn, mPrivateRow);
   gBS->RestoreTPL (OldTpl);
   return EFI_SUCCESS;
 }
@@ -894,11 +917,10 @@ ConsoleControlInstall (
 {
   EFI_STATUS                    Status;
   EFI_CONSOLE_CONTROL_PROTOCOL  *ConsoleControl;
-  EFI_HANDLE                    NewHandle;
 
-  Status = gBS->LocateProtocol (
+  Status = OcHandleProtocolFallback (
+    &gST->ConsoleOutHandle,
     &gEfiConsoleControlProtocolGuid,
-    NULL,
     (VOID *) &ConsoleControl
     );
 
@@ -912,18 +934,17 @@ ConsoleControlInstall (
       );
   }
 
-  NewHandle = NULL;
   gBS->InstallMultipleProtocolInterfaces (
-    &NewHandle,
+    &gST->ConsoleOutHandle,
     &gEfiConsoleControlProtocolGuid,
     &mConsoleControlProtocol,
     NULL
     );
 }
 
-VOID
+EFI_STATUS
 OcUseBuiltinTextOutput (
-  VOID
+  IN EFI_CONSOLE_CONTROL_SCREEN_MODE  Mode
   )
 {
   EFI_STATUS  Status;
@@ -945,22 +966,23 @@ OcUseBuiltinTextOutput (
 
   DEBUG ((DEBUG_INFO, "OCC: Using builtin text renderer with %d scale\n", mFontScale));
 
-  Status = AsciiTextReset (&mAsciiTextOutputProtocol, TRUE);
+  Status = AsciiTextResetEx (&mAsciiTextOutputProtocol, TRUE, TRUE);
 
-  if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_INFO, "OCC: Cannot setup ASCII output - %r\n", Status));
-    return;
+  if (!EFI_ERROR (Status)) {
+    OcConsoleControlSetMode (Mode);
+    OcConsoleControlInstallProtocol (&mConsoleControlProtocol, NULL, NULL);
+
+    gST->ConOut = &mAsciiTextOutputProtocol;
+    gST->Hdr.CRC32 = 0;
+
+    gBS->CalculateCrc32 (
+      gST,
+      gST->Hdr.HeaderSize,
+      &gST->Hdr.CRC32
+      );
   }
 
-  OcConsoleControlSetMode (EfiConsoleControlScreenGraphics);
-  OcConsoleControlInstallProtocol (&mConsoleControlProtocol, NULL, NULL);
+  DEBUG ((DEBUG_INFO, "OCC: Setup ASCII Output - %r\n", Status));
 
-  gST->ConOut = &mAsciiTextOutputProtocol;
-  gST->Hdr.CRC32 = 0;
-
-  gBS->CalculateCrc32 (
-    gST,
-    gST->Hdr.HeaderSize,
-    &gST->Hdr.CRC32
-    );
+  return Status;
 }

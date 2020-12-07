@@ -48,7 +48,7 @@ UefiMain (
 
   OcConsoleControlSetMode (EfiConsoleControlScreenText);
 
-  OcSetConsoleResolution (0, 0, 0);
+  OcSetConsoleResolution (0, 0, 0, FALSE);
 
   Status = GetArguments (&Argc, &Argv);
   if (EFI_ERROR (Status) || Argc < 5) {
@@ -121,7 +121,7 @@ UefiMain (
 
   if (BeepGenProtocol != NULL) {
     Status = BeepGenProtocol->GenBeep (
-      Count,
+      (UINT32) Count,
       Signal,
       Silence
       );

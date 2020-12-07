@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 
 #include <OpenCore.h>
 
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 #include <Guid/GlobalVariable.h>
 
 #include <Library/BaseLib.h>
@@ -191,7 +191,6 @@ OcLoadUefiOutputSupport (
 {
   EFI_STATUS           Status;
   CONST CHAR8          *AsciiRenderer;
-  CONST CHAR8          *AsciiCacheMode;
   OC_CONSOLE_RENDERER  Renderer;
   UINT32               Width;
   UINT32               Height;
@@ -212,11 +211,12 @@ OcLoadUefiOutputSupport (
 
   DEBUG ((
     DEBUG_INFO,
-    "OC: Requested resolution is %ux%u@%u (max: %d) from %a\n",
+    "OC: Requested resolution is %ux%u@%u (max: %d, force: %d) from %a\n",
     Width,
     Height,
     Bpp,
     SetMax,
+    Config->Uefi.Output.ForceResolution,
     OC_BLOB_GET (&Config->Uefi.Output.Resolution)
     ));
 
@@ -224,45 +224,42 @@ OcLoadUefiOutputSupport (
     Status = OcSetConsoleResolution (
       Width,
       Height,
-      Bpp
+      Bpp,
+      Config->Uefi.Output.ForceResolution
       );
     DEBUG ((
-      EFI_ERROR (Status) ? DEBUG_WARN : DEBUG_INFO,
-      "OC: Changed resolution to %ux%u@%u (max: %d) from %a - %r\n",
+      EFI_ERROR (Status) && Status != EFI_ALREADY_STARTED ? DEBUG_WARN : DEBUG_INFO,
+      "OC: Changed resolution to %ux%u@%u (max: %d, force: %d) from %a - %r\n",
       Width,
       Height,
       Bpp,
       SetMax,
+      Config->Uefi.Output.ForceResolution,
       OC_BLOB_GET (&Config->Uefi.Output.Resolution),
       Status
       ));
+  } else {
+    Status = EFI_UNSUPPORTED;
   }
 
   if (Config->Uefi.Output.DirectGopRendering) {
-    AsciiCacheMode = OC_BLOB_GET (&Config->Uefi.Output.DirectGopCacheMode);
-
-    if (AsciiCacheMode[0] == '\0') {
-      OcUseDirectGop (-1);
-    } else if (AsciiStrCmp (AsciiCacheMode, "Uncacheable") == 0) {
-      OcUseDirectGop (CacheUncacheable);
-    } else if (AsciiStrCmp (AsciiCacheMode, "WriteCombining") == 0) {
-      OcUseDirectGop (CacheWriteCombining);
-    } else if (AsciiStrCmp (AsciiCacheMode, "WriteThrough") == 0) {
-      OcUseDirectGop (CacheWriteThrough);
-    } else {
-      DEBUG ((DEBUG_WARN, "OC: Requested unknown cache mode %a\n", AsciiCacheMode));
-      OcUseDirectGop (-1);
-    }
+    OcUseDirectGop (-1);
   }
 
-  if (Config->Uefi.Output.ReconnectOnResChange) {
+  if (Config->Uefi.Output.ReconnectOnResChange && !EFI_ERROR (Status)) {
     OcReconnectConsole ();
+  }
+
+  if (Config->Uefi.Output.UgaPassThrough) {
+    OcProvideUgaPassThrough ();
   }
 
   AsciiRenderer = OC_BLOB_GET (&Config->Uefi.Output.TextRenderer);
 
   if (AsciiRenderer[0] == '\0' || AsciiStrCmp (AsciiRenderer, "BuiltinGraphics") == 0) {
     Renderer = OcConsoleRendererBuiltinGraphics;
+  } else if (AsciiStrCmp (AsciiRenderer, "BuiltinText") == 0) {
+    Renderer = OcConsoleRendererBuiltinText;
   } else if (AsciiStrCmp (AsciiRenderer, "SystemGraphics") == 0) {
     Renderer = OcConsoleRendererSystemGraphics;
   } else if (AsciiStrCmp (AsciiRenderer, "SystemText") == 0) {

@@ -29,12 +29,12 @@
 [Sources]
   DebugSmbios.c
   DebugSmbios.h
+  SmbiosDump.c
   SmbiosPatch.c
   SmbiosInternal.c
   SmbiosInternal.h
 
 [Packages]
-  EfiPkg/EfiPkg.dec
   MdePkg/MdePkg.dec
   OpenCorePkg/OpenCorePkg.dec
   UefiCpuPkg/UefiCpuPkg.dec
@@ -55,5 +55,7 @@
   BaseMemoryLib
   MemoryAllocationLib
   OcCpuLib
+  OcFileLib
   OcMemoryLib
+  PrintLib
 

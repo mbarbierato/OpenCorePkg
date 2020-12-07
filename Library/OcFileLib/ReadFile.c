@@ -150,56 +150,61 @@ ReadFileSize (
   return Status;
 }
 
-/* Ensure user's custom entry devicepath valid and file exist */
-BOOLEAN
-IsFileDevicePathValid (
-  IN EFI_DEVICE_PATH_PROTOCOL      *DevicePath
+VOID *
+ReadFileFromFile (
+  IN  EFI_FILE_PROTOCOL   *RootFile,
+  IN  CONST CHAR16        *FilePath,
+  OUT UINT32              *FileSize OPTIONAL,
+  IN  UINT32              MaxFileSize OPTIONAL
   )
 {
-  EFI_STATUS                       Status;
-  EFI_SIMPLE_FILE_SYSTEM_PROTOCOL  *FileSystem;
-  CONST CHAR16                     *FilePath;
-  CHAR16                           *DevicePathText;
-  EFI_HANDLE                       DeviceHandle;
-  EFI_DEVICE_PATH_PROTOCOL         *DevicePathNode;
-  EFI_FILE_HANDLE                  Volume;
-  EFI_FILE_PROTOCOL                *File;
-  
-  DevicePathNode = DevicePath;
-  Status = gBS->LocateDevicePath (&gEfiSimpleFileSystemProtocolGuid, &DevicePathNode, &DeviceHandle);
+  EFI_STATUS            Status;
+  EFI_FILE_PROTOCOL     *File;
+  UINT32                Size;
+  UINT8                 *FileBuffer;
+
+  ASSERT (RootFile != NULL);
+  ASSERT (FilePath != NULL);
+
+  Status = SafeFileOpen (
+    RootFile,
+    &File,
+    (CHAR16 *) FilePath,
+    EFI_FILE_MODE_READ,
+    0
+    );
+
   if (EFI_ERROR (Status)) {
-    return FALSE;
+    return NULL;
   }
-  
-  Status = gBS->HandleProtocol (
-             DeviceHandle,
-             &gEfiSimpleFileSystemProtocolGuid,
-             (VOID **) &FileSystem
-             );
-  
+
+  Status = GetFileSize (File, &Size);
+  if (EFI_ERROR (Status)
+    || Size >= MAX_UINT32 - 1
+    || (MaxFileSize > 0 && Size > MaxFileSize)) {
+    File->Close (File);
+    return NULL;
+  }
+
+  FileBuffer = AllocatePool (Size + 2);
+  if (FileBuffer == NULL) {
+    File->Close (File);
+    return NULL;
+  }
+
+  Status = GetFileData (File, 0, Size, FileBuffer);
+  File->Close (File);
   if (EFI_ERROR (Status)) {
-    return FALSE;
+    FreePool (FileBuffer);
+    return NULL;
   }
-  
-  DevicePathText = ConvertDevicePathToText (DevicePath, FALSE, FALSE);
-  if (DevicePathText != NULL) {
-    FilePath = StrStr (DevicePathText, L"\\") + 1;
-    FreePool (DevicePathText);
+
+  FileBuffer[Size]     = 0;
+  FileBuffer[Size + 1] = 0;
+
+  if (FileSize != NULL) {
+    *FileSize = Size;
   }
-  
-  if (FileSystem != NULL) {
-    Status = FileSystem->OpenVolume (FileSystem, &Volume);
-    if (EFI_ERROR (Status)) {
-      return FALSE;
-    }
-    
-    Status = SafeFileOpen (Volume, &File, (CHAR16 *) FilePath, EFI_FILE_MODE_READ, 0);
-    Volume->Close (Volume);
-    
-    if (!EFI_ERROR (Status)) {
-      File->Close (File);
-      return TRUE;
-    }
-  }
-  return FALSE;
+
+  return FileBuffer;
 }

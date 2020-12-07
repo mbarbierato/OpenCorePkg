@@ -39,6 +39,7 @@
   OpenCoreAcpi.c
   OpenCoreDevProps.c
   OpenCoreKernel.c
+  OpenCoreKernelPatch.c
   OpenCoreMisc.c
   OpenCoreNvram.c
   OpenCorePlatform.c
@@ -48,10 +49,8 @@
   OpenCoreVault.c
 
 [Packages]
-  EfiPkg/EfiPkg.dec
   OpenCorePkg/OpenCorePkg.dec
   OpenCorePkg/OpenCorePkg.dec
-  MacInfoPkg/MacInfoPkg.dec
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
   UefiCpuPkg/UefiCpuPkg.dec
@@ -78,8 +77,10 @@
   OcAppleImageConversionLib
   OcAudioLib
   OcInputLib
+  OcAppleImg4Lib
   OcAppleKernelLib
   OcAppleKeyMapLib
+  OcAppleSecureBootLib
   OcAppleUserInterfaceThemeLib
   OcBootManagementLib
   OcConfigurationLib
@@ -99,9 +100,10 @@
   OcStorageLib
   OcUnicodeCollationEngGenericLib
   OcVirtualFsLib
-  MacInfoLib
+  OcMacInfoLib
   PcdLib
   PrintLib
+  SerialPortLib
   UefiBootServicesTableLib
   UefiDriverEntryPoint
   UefiLib

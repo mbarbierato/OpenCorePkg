@@ -1,13 +1,11 @@
-CC ?= gcc
-CFLAGS=-c -Wall -Wextra -pedantic -O3 -DDEBUG
+## @file
+# Copyright (c) 2019, vit9696. All rights reserved.
+# Copyright (c) 2020, PMheart. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+##
 
-all: EfiResTool
-
-EfiResTool: EfiResTool.o
-	$(CC) EfiResTool.o -o EfiResTool
-
-.c:
-	$(CC) $(CFLAGS) $< -o $@
-
-clean:
-	rm -rf *.o EfiResTool
+STANDALONE     = 1
+PROJECT        = EfiResTool
+PRODUCT        = $(PROJECT)$(SUFFIX)
+OBJS           = $(PROJECT).o
+include ../../User/Makefile

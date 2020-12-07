@@ -281,7 +281,7 @@ OcKeyMapFlush (
       );
 
     if (EFI_ERROR (Status)) {
-      DEBUG ((DEBUG_ERROR, "OCAK: GetKeyStrokes failure - %r\n", Status));
+      DEBUG ((DEBUG_ERROR, "OCKM: GetKeyStrokes failure - %r\n", Status));
       break;
     }
 
@@ -316,7 +316,7 @@ OcKeyMapFlush (
   @param[in]      This          A pointer to the protocol instance.
   @param[in]      Modifiers     The modifiers manipulating the given keys.
   @param[in]      NumberOfKeyCodes  The number of keys present in KeyCodes.
-  @param[in, out] KeyCodes          The list of keys to check for.  The children
+  @param[in,out]  KeyCodes          The list of keys to check for.  The children
                                 may be sorted in the process.
   @param[in]      ExactMatch    Specifies whether Modifiers and KeyCodes should be
                                 exact matches or just contained.
@@ -595,8 +595,8 @@ OcAppleKeyMapInstallProtocols (
   APPLE_KEY_MAP_AGGREGATOR_PROTOCOL *Aggregator;
 
   if (Reinstall) {
-    Status = UninstallAllProtocolInstances (&gAppleKeyMapDatabaseProtocolGuid);
-    Status2 = UninstallAllProtocolInstances (&gAppleKeyMapAggregatorProtocolGuid);
+    Status = OcUninstallAllProtocolInstances (&gAppleKeyMapDatabaseProtocolGuid);
+    Status2 = OcUninstallAllProtocolInstances (&gAppleKeyMapAggregatorProtocolGuid);
     if (EFI_ERROR (Status) || EFI_ERROR (Status2)) {
       DEBUG ((DEBUG_ERROR, "OCKM: Uninstall failed: %r/%r\n", Status, Status2));
       return NULL;

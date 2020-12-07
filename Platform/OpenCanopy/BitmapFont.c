@@ -84,6 +84,11 @@ BmfGetKerningPair (
   ASSERT (Context != NULL);
 
   Pairs = Context->KerningPairs;
+
+  if (Pairs == NULL) {
+    return NULL;
+  }
+
   //
   // Binary Search for the first character as the list is sorted.
   //
@@ -202,32 +207,28 @@ BmfContextInitialize (
           return FALSE;
         }
 
-        Context->Info = (CONST BMF_BLOCK_INFO *)Block;
+        Context->Info = (CONST BMF_BLOCK_INFO *)(Block + 1);
 
         DEBUG ((
           DEBUG_INFO,
-          "Info->fontSize %u\n"
-          "Info->bitField %u\n"
-          "Info->charSet %u\n"
-          "Info->stretchH %u\n"
-          "Info->aa %u\n"
-          "Info->paddingUp %u\n"
-          "Info->paddingRight %u\n"
-          "Info->paddingDown %u\n"
-          "Info->paddingLeft %u\n"
-          "Info->spacingHoriz %u\n"
-          "Info->spacingVert %u\n"
-          "Info->outline %u\n"
-          "Info->fontName %a\n",
+          "OCUI: Info->fontSize %u Info->bitField %u Info->charSet %u Info->stretchH %u Info->aa %u\n",
           Context->Info->fontSize,
           Context->Info->bitField,
           Context->Info->charSet,
           Context->Info->stretchH,
-          Context->Info->aa,
+          Context->Info->aa
+          ));
+        DEBUG ((
+          DEBUG_INFO,
+          "OCUI: Info->paddingUp %u Info->paddingRight %u Info->paddingDown %u Info->paddingLeft %u\n",
           Context->Info->paddingUp,
           Context->Info->paddingRight,
           Context->Info->paddingDown,
-          Context->Info->paddingLeft,
+          Context->Info->paddingLeft
+          ));
+        DEBUG ((
+          DEBUG_INFO,
+          "OCUI: Info->spacingHoriz %u Info->spacingVert %u Info->outline %u Info->fontName %a\n",
           Context->Info->spacingHoriz,
           Context->Info->spacingVert,
           Context->Info->outline,
@@ -301,13 +302,23 @@ BmfContextInitialize (
     Block = (CONST BMF_BLOCK_HEADER *)((UINTN)(Block + 1) + Block->size);
   }
 
-  if (Context->Info         == NULL
-   || Context->Common       == NULL
-   || Context->Pages        == NULL
-   || Context->Chars        == NULL
-   || Context->KerningPairs == NULL
-    ) {
-    DEBUG ((DEBUG_WARN, "BMF: Missing block\n"));
+  if (Context->Info == NULL) {
+    DEBUG ((DEBUG_WARN, "BMF: Missing Info block\n"));
+    return FALSE;
+  }
+
+  if (Context->Common == NULL) {
+    DEBUG ((DEBUG_WARN, "BMF: Missing Common block\n"));
+    return FALSE;
+  }
+
+  if (Context->Pages == NULL) {
+    DEBUG ((DEBUG_WARN, "BMF: Missing Pages block\n"));
+    return FALSE;
+  }
+
+  if (Context->Chars == NULL) {
+    DEBUG ((DEBUG_WARN, "BMF: Missing Chars block\n"));
     return FALSE;
   }
 
@@ -398,68 +409,69 @@ BmfContextInitialize (
     return FALSE;
   }
 
-  Context->Height  = (UINT16) Height;
+  Context->Height  = Context->Common->lineHeight;
   Context->OffsetY = -MinY;
 
   Pairs = Context->KerningPairs;
-  for (Index = 0; Index < Context->NumKerningPairs; ++Index) {
-    Char = BmfGetChar (Context, Pairs[Index].first);
-    if (Char == NULL) {
-      DEBUG ((
-        DEBUG_WARN,
-        "BMF: Pair char %u not found\n",
-        Pairs[Index].first
-        ));
-      return FALSE;
-    }
-
-    Result = OcOverflowAddS32 (
-               Char->xoffset + Char->width,
-               Pairs[Index].amount,
-               &Width
-               );
-    Result |= OcOverflowAddS32 (
-                Char->xoffset + Char->xadvance,
-                Pairs[Index].amount,
-                &Advance
-                );
-    if (Result
-     || 0 > Width || Width > MAX_UINT16
-     || 0 > Advance || Advance > MAX_UINT16) {
-       DEBUG ((
-         DEBUG_WARN,
-         "BMF: Pair insane\n"
-         " first %u\n"
-         " second %u\n"
-         " amount %d\n",
-         Pairs[Index].first,
-         Pairs[Index].second,
-         Pairs[Index].amount
-         ));
-      return FALSE;
-    }
-    //
-    // This only yields unexpected but not undefined behaviour when not met,
-    // hence it is fine verifying it only DEBUG mode.
-    //
-    DEBUG_CODE_BEGIN ();
-    if (Index > 0) {
-      if (Pairs[Index - 1].first > Pairs[Index].first) {
-        DEBUG ((DEBUG_WARN, "BMF: First Character IDs are not sorted\n"));
+  if (Pairs != NULL) { // According to the docs, kerning pairs are optional
+    for (Index = 0; Index < Context->NumKerningPairs; ++Index) {
+      Char = BmfGetChar (Context, Pairs[Index].first);
+      if (Char == NULL) {
+        DEBUG ((
+          DEBUG_WARN,
+          "BMF: Pair char %u not found\n",
+          Pairs[Index].first
+          ));
         return FALSE;
       }
 
-      if (Pairs[Index - 1].first == Pairs[Index].first) {
-        if (Pairs[Index - 1].second > Pairs[Index].second) {
-          DEBUG ((DEBUG_WARN, "BMF: Second Character IDs are not sorted\n"));
-          return FALSE;
-        } else if (Pairs[Index - 1].second == Pairs[Index].second) {
-          DEBUG ((DEBUG_WARN, "BMF: Second Character ID duplicate\n"));
+      Result = OcOverflowAddS32 (
+                 Char->xoffset + Char->width,
+                 Pairs[Index].amount,
+                 &Width
+                 );
+      Result |= OcOverflowAddS32 (
+                  Char->xoffset + Char->xadvance,
+                  Pairs[Index].amount,
+                  &Advance
+                  );
+      if (Result
+       || 0 > Width || Width > MAX_UINT16
+       || 0 > Advance || Advance > MAX_UINT16) {
+         DEBUG ((
+           DEBUG_WARN,
+           "BMF: Pair at index %d insane: first %u, second %u, amount %d\n",
+           Index,
+           Pairs[Index].first,
+           Pairs[Index].second,
+           Pairs[Index].amount
+           ));
+        return FALSE;
+      }
+      //
+      // This only yields unexpected but not undefined behaviour when not met,
+      // hence it is fine verifying it only DEBUG mode.
+      //
+      DEBUG_CODE_BEGIN ();
+      if (Index > 0) {
+        if (Pairs[Index - 1].first > Pairs[Index].first) {
+          DEBUG ((DEBUG_WARN, "BMF: First Character IDs are not sorted\n"));
           return FALSE;
         }
+
+        if (Pairs[Index - 1].first == Pairs[Index].first) {
+          if (Pairs[Index - 1].second > Pairs[Index].second) {
+            DEBUG ((DEBUG_WARN, "BMF: Second Character IDs are not sorted\n"));
+            return FALSE;
+          }
+          if (Pairs[Index - 1].second == Pairs[Index].second) {
+            DEBUG ((DEBUG_WARN, "BMF: Second Character ID duplicate\n"));
+            return FALSE;
+          }
+        }
       }
+      DEBUG_CODE_END ();
     }
-    DEBUG_CODE_END ();
   }
 
   return TRUE;
@@ -587,22 +599,32 @@ BmfGetTextInfo (
 }
 
 STATIC
+EFI_GRAPHICS_OUTPUT_BLT_PIXEL
+mBlack = { 0, 0, 0, 255 };
+
+STATIC
+EFI_GRAPHICS_OUTPUT_BLT_PIXEL
+mWhite = { 255, 255, 255, 255 };
+
+STATIC
 VOID
-CopyInverted (
+BlendMem (
   EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Dst,
-  EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Src,
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL *AlphaSrc,
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Color,
   UINTN                         PixelCount
   )
 {
   UINTN  Index;
 
   for (Index = 0; Index < PixelCount; ++Index) {
-    Dst->Red       = 255 - Src->Red;
-    Dst->Green     = 255 - Src->Green;
-    Dst->Blue      = 255 - Src->Blue;
-    Dst->Reserved  = Src->Reserved;
+    //
+    // We assume that the font is generated by dpFontBaker
+    // and has only gray channel, which should be interpreted as alpha.
+    //
+    GuiBlendPixel(Dst, Color, AlphaSrc->Red);
     ++Dst;
-    ++Src;
+    ++AlphaSrc;
   }
 }
 
@@ -669,16 +691,18 @@ GuiGetLabel (
       ) {
 
       if (Inverted) {
-        CopyInverted (
+        BlendMem (
           &Buffer[TargetRowOffset + TargetCharX + TextInfo->Chars[Index]->xoffset + InitialCharX],
           &Context->FontImage.Buffer[SourceRowOffset + TextInfo->Chars[Index]->x + InitialCharX],
+          &mBlack,
           (TextInfo->Chars[Index]->width + InitialWidthOffset)
           );
       } else {
-        CopyMem (
+        BlendMem (
           &Buffer[TargetRowOffset + TargetCharX + TextInfo->Chars[Index]->xoffset + InitialCharX],
           &Context->FontImage.Buffer[SourceRowOffset + TextInfo->Chars[Index]->x + InitialCharX],
-          (TextInfo->Chars[Index]->width + InitialWidthOffset) * sizeof (*Buffer)
+          &mWhite,
+          (TextInfo->Chars[Index]->width + InitialWidthOffset)
           );
       }
     }
@@ -724,7 +748,8 @@ GuiFontConstruct (
   Status = GuiPngToImage (
     &Context->FontImage,
     FontImage,
-    FontImageSize
+    FontImageSize,
+    FALSE
     );
   FreePool (FontImage);
 
@@ -751,8 +776,10 @@ GuiFontDestruct (
   ASSERT (Context != NULL);
   if (Context->FontImage.Buffer != NULL) {
     FreePool (Context->FontImage.Buffer);
+    Context->FontImage.Buffer = NULL;
   }
   if (Context->KerningData != NULL) {
     FreePool (Context->KerningData);
+    Context->KerningData = NULL;
   }
 }

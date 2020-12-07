@@ -27,18 +27,21 @@
 # VALID_ARCHITECTURES = IA32 X64
 
 [Packages]
-  EfiPkg/EfiPkg.dec
   OpenCorePkg/OpenCorePkg.dec
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
 
 [LibraryClasses]
   BaseLib
+  OcFileLib
+  OcMemoryLib
   OcMiscLib
+  PrintLib
 
 [Guids]
   gEfiAcpi10TableGuid
   gEfiAcpi20TableGuid
 
 [Sources]
+  AcpiDump.c
   OcAcpiLib.c

@@ -13,18 +13,18 @@
 
 #include <Library/OcBootManagementLib.h>
 
-#define MAX_CURSOR_DIMENSION  144
+#define MAX_CURSOR_DIMENSION  144U
 
-#define BOOT_ENTRY_DIMENSION       144
+#define BOOT_ENTRY_DIMENSION       144U
 #define BOOT_ENTRY_ICON_DIMENSION  APPLE_DISK_ICON_DIMENSION
-#define BOOT_ENTRY_LABEL_SPACE     4
-#define BOOT_ENTRY_LABEL_HEIGHT    13
+#define BOOT_ENTRY_LABEL_SPACE     4U
+#define BOOT_ENTRY_LABEL_HEIGHT    12U
 
-#define BOOT_ENTRY_SPACE  8
+#define BOOT_ENTRY_SPACE  8U
 
-#define BOOT_SELECTOR_WIDTH                 144
+#define BOOT_SELECTOR_WIDTH                 144U
 #define BOOT_SELECTOR_BACKGROUND_DIMENSION  BOOT_SELECTOR_WIDTH
-#define BOOT_SELECTOR_BUTTON_DIMENSION      40
+#define BOOT_SELECTOR_BUTTON_DIMENSION      40U
 #define BOOT_SELECTOR_BUTTON_SPACE          (BOOT_ENTRY_LABEL_SPACE + BOOT_ENTRY_LABEL_HEIGHT + 3)
 #define BOOT_SELECTOR_HEIGHT                (BOOT_SELECTOR_BACKGROUND_DIMENSION + BOOT_SELECTOR_BUTTON_SPACE + BOOT_SELECTOR_BUTTON_DIMENSION)
 
@@ -69,7 +69,7 @@ typedef enum {
   ICON_TYPE_COUNT    = 2,
 } ICON_TYPE;
 
-typedef struct {
+typedef struct _BOOT_PICKER_GUI_CONTEXT {
   GUI_IMAGE                            Icons[ICON_NUM_TOTAL][ICON_TYPE_COUNT];
   GUI_IMAGE                            Labels[LABEL_NUM_TOTAL];
   // GUI_IMAGE                         Poof[5];
@@ -78,7 +78,7 @@ typedef struct {
   EFI_GRAPHICS_OUTPUT_BLT_PIXEL_UNION  BackgroundColor;
   BOOLEAN                              HideAuxiliary;
   BOOLEAN                              Refresh;
-  BOOLEAN                              Light;
+  BOOLEAN                              LightBackground;
   BOOLEAN                              DoneIntroAnimation;
   UINT8                                Scale;
   UINT32                               CursorDefaultX;
@@ -108,8 +108,8 @@ BootPickerViewDeinitialize (
 
 CONST GUI_IMAGE *
 InternalGetCursorImage (
-  IN OUT GUI_SCREEN_CURSOR  *This,
-  IN     VOID               *Context
+  IN OUT GUI_SCREEN_CURSOR        *This,
+  IN     BOOT_PICKER_GUI_CONTEXT  *Context
   );
 
 #endif // GUI_APP_H

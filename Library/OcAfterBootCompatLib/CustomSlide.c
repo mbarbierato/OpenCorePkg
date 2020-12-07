@@ -16,7 +16,7 @@
 #include "BootCompatInternal.h"
 
 #include <Guid/AppleVariable.h>
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 #include <IndustryStandard/AppleHibernate.h>
 #include <IndustryStandard/AppleCsrConfig.h>
 
@@ -91,7 +91,7 @@ GenerateSlideValue (
 
   do {
     DivU64x32Remainder (GetPseudoRandomNumber64 (), SlideSupport->ValidSlideCount, &Slide);
-  } while (Slide == 0);
+  } while (SlideSupport->ValidSlides[Slide] == 0);
 
   return SlideSupport->ValidSlides[Slide];
 }
@@ -362,6 +362,14 @@ ShouldUseCustomSlideOffset (
       FallbackSlide    = (UINT8) Slide;
     }
 
+    //
+    // Stop evalutating slides after exceeding ProvideMaxSlide, may break when
+    // no slides are available.
+    //
+    if (SlideSupport->ProvideMaxSlide > 0 && Slide > SlideSupport->ProvideMaxSlide) {
+      break;
+    }
+
     if ((StartAddr + AvailableSize) != EndAddr) {
       //
       // The slide region is not continuous.
@@ -628,6 +636,12 @@ AppleSlideUnlockForSafeMode (
   //   }
   // }
   //
+  // The even newer workaround for 11.0 a newer is to patch the test.
+  // if (State & BOOT_MODE_SAFE) {
+  //   * Do roughly nothing *
+  // } else {
+  //   * Setup KASLR *
+  //
 
   //
   // This is a reasonable maximum distance to expect between the instructions.
@@ -635,6 +649,8 @@ AppleSlideUnlockForSafeMode (
   STATIC CONST UINTN MaxDist         = 0x10;
   STATIC CONST UINT8 SearchSeqNew[]  = {0xF6, 0xC4, 0x40, 0x75};
   STATIC CONST UINT8 SearchSeqNew2[] = {0x0F, 0xBA, 0xE0, 0x0E, 0x72};
+  STATIC CONST UINT8 SearchSeqSur[]  = {0xF6, 0xC1, 0x01, 0x75};
+  STATIC CONST UINT8 SearchSeqSur2[] = {0xF6, 0xC1, 0x01, 0x74};
   STATIC CONST UINT8 SearchSeq[]     = {0x01, 0x40, 0x00, 0x00};
 
   UINT8       *StartOff;
@@ -643,6 +659,7 @@ AppleSlideUnlockForSafeMode (
   UINTN       SecondOff;
   UINTN       SearchSeqNewSize;
   BOOLEAN     NewWay;
+  UINT8       SurWay;
 
 
   StartOff = ImageBase;
@@ -650,9 +667,11 @@ AppleSlideUnlockForSafeMode (
 
   FirstOff  = 0;
   SecondOff = 0;
-  NewWay    = FALSE;
 
   do {
+    NewWay    = FALSE;
+    SurWay    = 0;
+
     while (StartOff + FirstOff <= EndOff) {
       if (StartOff + FirstOff <= EndOff - 1
        && CompareMem (StartOff + FirstOff, SearchSeqNew2, sizeof (SearchSeqNew2)) == 0) {
@@ -665,14 +684,20 @@ AppleSlideUnlockForSafeMode (
         break;
       } else if (CompareMem (StartOff + FirstOff, SearchSeq, sizeof (SearchSeq)) == 0) {
         break;
+      } else if (CompareMem (StartOff + FirstOff, SearchSeqSur, sizeof (SearchSeqSur)) == 0) {
+        SurWay = 1;
+        break;
+      } else if (CompareMem (StartOff + FirstOff, SearchSeqSur2, sizeof (SearchSeqSur2)) == 0) {
+        SurWay = 2;
+        break;
       }
       FirstOff++;
     }
 
     DEBUG ((
-      DEBUG_VERBOSE,
-      "OCABC: Found first %d at off %X\n",
-      (UINT32) NewWay,
+      DEBUG_INFO,
+      "OCABC: Found kaslr %a way at off %X\n",
+      SurWay ? "sur" : (NewWay ? "new" : "legacy"),
       (UINT32) FirstOff
       ));
 
@@ -682,6 +707,24 @@ AppleSlideUnlockForSafeMode (
         "OCABC: Failed to find first BOOT_MODE_SAFE | BOOT_MODE_ASLR sequence\n"
         ));
       break;
+    }
+
+    if (SurWay == 1) {
+      //
+      // Here we just patch the comparison code and the check by straight nopping.
+      //
+      DEBUG ((DEBUG_VERBOSE, "OCABC: Patching sur safe mode aslr check...\n"));
+      SetMem (StartOff + FirstOff, sizeof (SearchSeqSur) + 1, 0x90);
+      return;
+    }
+
+    if (SurWay == 2) {
+      //
+      // Here we just patch the comparison code and the check by straight nopping.
+      //
+      DEBUG ((DEBUG_VERBOSE, "OCABC: Patching sur safe mode aslr check v2...\n"));
+      *(StartOff + FirstOff + 3) = 0xEB;
+      return;
     }
 
     if (NewWay) {
@@ -736,6 +779,8 @@ AppleSlideGetVariable (
      OUT VOID                  *Data
   )
 {
+  BootCompat->SlideSupport.ProvideMaxSlide =  BootCompat->Settings.ProvideMaxSlide;
+
   if (VariableName != NULL && VendorGuid != NULL && DataSize != NULL
     && CompareGuid (VendorGuid, &gAppleBootVariableGuid)) {
 
@@ -756,8 +801,9 @@ AppleSlideGetVariable (
         Data
         );
     } else if (StrCmp (VariableName, L"boot-args") == 0
-      && !BootCompat->ServiceState.AppleCustomSlide
-      && ShouldUseCustomSlideOffset (&BootCompat->SlideSupport, GetMemoryMap, FilterMap, FilterMapContext)) {
+      && (!BootCompat->ServiceState.AppleCustomSlide || BootCompat->Settings.AllowRelocationBlock)
+      && ShouldUseCustomSlideOffset (&BootCompat->SlideSupport, GetMemoryMap, FilterMap, FilterMapContext)
+      && !BootCompat->ServiceState.AppleCustomSlide) {
       //
       // When we cannot allow some KASLR values due to used address we generate
       // a random slide value among the valid options, which we we pass via boot-args.
@@ -769,6 +815,9 @@ AppleSlideGetVariable (
       // because on older boards allocated memory above BASE_4GB causes instant reboots, and
       // on the only (so far) problematic X99 and X299 we have no free region for our pool anyway.
       // In any case, the current APTIOFIX_SPECULATED_KERNEL_SIZE value appears to work reliably.
+      //
+      // Note, when relocation block support is enabled, we always do the slide analysis
+      // (even when slide=0 is requested) to understand whether we need it or not at a later stage.
       //
       return GetVariableBootArgs (
         &BootCompat->SlideSupport,
@@ -808,4 +857,37 @@ AppleSlideRestore (
   // this is especially important.
   //
   HideSlideFromOs (SlideSupport, BootArgs);
+}
+
+UINTN
+AppleSlideGetRelocationSize (
+  IN OUT BOOT_COMPAT_CONTEXT   *BootCompat
+  )
+{
+  SLIDE_SUPPORT_STATE  *SlideSupport;
+
+  SlideSupport = &BootCompat->SlideSupport;
+
+  //
+  // When we could not have performed the analysis we have nothing to offer.
+  //
+  if (!SlideSupport->HasMemoryMapAnalysis) {
+    return 0;
+  }
+
+  //
+  // When we have no slides available we assume 0 is also unavailable.
+  //
+  if (SlideSupport->ValidSlideCount == 0) {
+    return BootCompat->SlideSupport.EstimatedKernelArea;
+  }
+
+  //
+  // If the first slide is not zero, then zero is unavailable.
+  //
+  if (SlideSupport->ValidSlides[0] != 0) {
+    return BootCompat->SlideSupport.EstimatedKernelArea;
+  }
+
+  return 0;
 }

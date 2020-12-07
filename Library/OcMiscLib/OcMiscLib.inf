@@ -28,7 +28,6 @@
 
 [Packages]
   OpenCorePkg/OpenCorePkg.dec
-  EfiPkg/EfiPkg.dec
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
 
@@ -39,6 +38,7 @@
 
 [LibraryClasses]
   BaseLib
+  IoLib
   UefiLib
   OcFileLib
   OcGuardLib

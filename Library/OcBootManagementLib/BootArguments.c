@@ -16,8 +16,10 @@
 
 #include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
+#include <Library/MemoryAllocationLib.h>
 #include <Library/OcBootManagementLib.h>
 #include <Library/OcMiscLib.h>
+#include <Library/PrintLib.h>
 #include <Library/UefiLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
 
@@ -43,8 +45,13 @@ OcParseBootArgs (
 
     Arguments->CommandLine = &BA1->CommandLine[0];
 
+    Arguments->KernelAddrP = &BA1->kaddr;
+    Arguments->SystemTableP = &BA1->efiSystemTable;
+    Arguments->RuntimeServicesPG = &BA1->efiRuntimeServicesPageStart;
+    Arguments->RuntimeServicesV = &BA1->efiRuntimeServicesVirtualPageStart;
     Arguments->DeviceTreeP = &BA1->deviceTreeP;
     Arguments->DeviceTreeLength = &BA1->deviceTreeLength;
+    Arguments->SystemTable = (EFI_SYSTEM_TABLE*)(UINTN) BA1->efiSystemTable;
   } else {
     //
     // Lion and newer
@@ -56,8 +63,13 @@ OcParseBootArgs (
 
     Arguments->CommandLine = &BA2->CommandLine[0];
 
+    Arguments->KernelAddrP = &BA2->kaddr;
+    Arguments->SystemTableP = &BA2->efiSystemTable;
+    Arguments->RuntimeServicesPG = &BA2->efiRuntimeServicesPageStart;
+    Arguments->RuntimeServicesV = &BA2->efiRuntimeServicesVirtualPageStart;
     Arguments->DeviceTreeP = &BA2->deviceTreeP;
     Arguments->DeviceTreeLength = &BA2->deviceTreeLength;
+    Arguments->SystemTable = (EFI_SYSTEM_TABLE*)(UINTN) BA2->efiSystemTable;
 
     if (BA2->flags & kBootArgsFlagCSRActiveConfig) {
       Arguments->CsrActiveConfig = &BA2->csrActiveConfig;
@@ -67,12 +79,14 @@ OcParseBootArgs (
 
 CONST CHAR8 *
 OcGetArgumentFromCmd (
-  IN CONST CHAR8  *CommandLine,
-  IN CONST CHAR8  *Argument,
-  IN CONST UINTN  ArgumentLength
+  IN  CONST CHAR8   *CommandLine,
+  IN  CONST CHAR8   *Argument,
+  IN  CONST UINTN   ArgumentLength,
+  OUT UINTN         *ValueLength OPTIONAL
   )
 {
-  CHAR8 *Str;
+  CHAR8   *Str;
+  CHAR8   *StrEnd;
 
   Str = AsciiStrStr (CommandLine, Argument);
 
@@ -86,8 +100,18 @@ OcGetArgumentFromCmd (
        Str[ArgumentLength - 1] != '=')) {
     return NULL;
   }
+  Str += ArgumentLength;
 
-  return Str + ArgumentLength;
+  if (ValueLength != NULL) {
+    StrEnd = AsciiStrStr (Str, " ");
+    if (StrEnd == NULL) {
+      *ValueLength = AsciiStrLen (Str);
+    } else {
+      *ValueLength = StrEnd - Str;
+    }
+  }
+
+  return Str;
 }
 
 VOID
@@ -173,11 +197,85 @@ OcAppendArgumentToCmd (
 }
 
 BOOLEAN
+OcAppendArgumentsToLoadedImage (
+  IN OUT EFI_LOADED_IMAGE_PROTOCOL  *LoadedImage,
+  IN     CONST CHAR8                **Arguments,
+  IN     UINT32                     ArgumentCount,
+  IN     BOOLEAN                    Replace
+  )
+{
+  UINT32  Index;
+  UINTN   ArgumentLength;
+  UINTN   TotalLength;
+  CHAR16  *NewArguments;
+  CHAR16  *Walker;
+
+  ASSERT (LoadedImage != NULL);
+  ASSERT (Arguments != NULL);
+  ASSERT (ArgumentCount > 0);
+
+  TotalLength = 0;
+
+  //
+  // Count length including spaces between or '\0' for the last argument.
+  //
+  for (Index = 0; Index < ArgumentCount; ++Index) {
+    ArgumentLength = AsciiStrSize (Arguments[Index]);
+    if (OcOverflowAddUN (TotalLength, ArgumentLength, &TotalLength)) {
+      return FALSE;
+    }
+  }
+
+  if (OcOverflowMulUN (TotalLength, sizeof (CHAR16), &TotalLength)) {
+    return FALSE;
+  }
+
+  Replace |= LoadedImage->LoadOptionsSize < sizeof (CHAR16);
+  if (!Replace
+    && OcOverflowTriAddUN (TotalLength, sizeof (CHAR16), LoadedImage->LoadOptionsSize, &TotalLength)) {
+    return FALSE;
+  }
+
+  NewArguments = AllocatePool (TotalLength);
+  if (NewArguments == NULL) {
+    return FALSE;
+  }
+
+  Walker = NewArguments;
+  for (Index = 0; Index < ArgumentCount; ++Index) {
+    if (Index != 0) {
+      *Walker++ = ' ';
+    }
+
+    ArgumentLength = AsciiStrLen (Arguments[Index]);
+    AsciiStrToUnicodeStrS (
+      Arguments[Index],
+      Walker,
+      ArgumentLength + 1
+      );
+    Walker += ArgumentLength;
+  }
+
+  if (!Replace) {
+    *Walker++ = ' ';
+    CopyMem (Walker, LoadedImage->LoadOptions, LoadedImage->LoadOptionsSize);
+    Walker += LoadedImage->LoadOptionsSize / sizeof (CHAR16);
+    *Walker++ = '\0';
+  }
+
+  LoadedImage->LoadOptions = NewArguments;
+  LoadedImage->LoadOptionsSize = (UINT32) TotalLength;
+
+  return TRUE;
+}
+
+BOOLEAN
 OcCheckArgumentFromEnv (
-  IN EFI_LOADED_IMAGE  *LoadedImage  OPTIONAL,
-  IN EFI_GET_VARIABLE  GetVariable  OPTIONAL,
-  IN CONST CHAR8       *Argument,
-  IN CONST UINTN       ArgumentLength
+  IN     EFI_LOADED_IMAGE   *LoadedImage OPTIONAL,
+  IN     EFI_GET_VARIABLE   GetVariable OPTIONAL,
+  IN     CONST CHAR8        *Argument,
+  IN     CONST UINTN        ArgumentLength,
+  IN OUT CHAR8              **Value OPTIONAL
   )
 {
   CHAR16      *Options;
@@ -188,6 +286,8 @@ OcCheckArgumentFromEnv (
   UINTN       LastIndex;
   CHAR16      Last;
   BOOLEAN     HasArgument;
+  CONST CHAR8 *ArgValue;
+  UINTN       ArgValueLength;
 
   HasArgument = FALSE;
 
@@ -206,7 +306,8 @@ OcCheckArgumentFromEnv (
 
       UnicodeStrToAsciiStrS (Options, BootArgsVar, BOOT_LINE_LENGTH);
 
-      if (OcGetArgumentFromCmd (BootArgsVar, Argument, ArgumentLength)) {
+      ArgValue = OcGetArgumentFromCmd (BootArgsVar, Argument, ArgumentLength, &ArgValueLength);
+      if (ArgValue != NULL) {
         HasArgument = TRUE;
       }
 
@@ -236,9 +337,17 @@ OcCheckArgumentFromEnv (
       //
       BootArgsVar[BootArgsVarLen-1] = '\0';
 
-      if (OcGetArgumentFromCmd (BootArgsVar, Argument, ArgumentLength)) {
+      ArgValue = OcGetArgumentFromCmd (BootArgsVar, Argument, ArgumentLength, &ArgValueLength);
+      if (ArgValue != NULL) {
         HasArgument = TRUE;
       }
+    }
+  }
+
+  if (HasArgument && Value != NULL) {
+    *Value = AllocateCopyPool (AsciiStrnSizeS (ArgValue, ArgValueLength), ArgValue);
+    if (*Value == NULL) {
+      return FALSE;
     }
   }
 

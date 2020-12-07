@@ -14,11 +14,12 @@
 
 #include <Uefi.h>
 
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 #include <IndustryStandard/CpuId.h>
 #include <IndustryStandard/GenericIch.h>
 #include <Protocol/PciIo.h>
 #include <Library/BaseLib.h>
+#include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
 #include <Library/IoLib.h>
 #include <Library/OcCpuLib.h>
@@ -26,7 +27,7 @@
 #include <Library/OcMiscLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
-#include <ProcessorInfo.h>
+#include <IndustryStandard/ProcessorInfo.h>
 #include <Register/Msr.h>
 
 #include "OcCpuInternals.h"
@@ -268,6 +269,7 @@ InternalCalculateTSCFromPMTimer (
 UINT64
 InternalCalculateARTFrequencyIntel (
   OUT UINT64   *CPUFrequency,
+  OUT UINT64   *TscAdjustPtr OPTIONAL,
   IN  BOOLEAN  Recalculate
   )
 {
@@ -307,6 +309,10 @@ InternalCalculateARTFrequencyIntel (
     if (CpuVendor == CPUID_VENDOR_INTEL && MaxId >= CPUID_TIME_STAMP_COUNTER) {
       TscAdjust = AsmReadMsr64 (MSR_IA32_TSC_ADJUST);
       DEBUG ((DEBUG_INFO, "OCCPU: TSC Adjust %Lu\n", TscAdjust));
+
+      if (TscAdjustPtr != NULL) {
+        *TscAdjustPtr = TscAdjust;
+      }
 
       AsmCpuid (
         CPUID_TIME_STAMP_COUNTER,
@@ -417,7 +423,12 @@ InternalCalculateVMTFrequency (
 {
   UINT32                  CpuidEax;
   UINT32                  CpuidEbx;
+  UINT32                  CpuidEcx;
+  UINT32                  CpuidEdx;
   CPUID_VERSION_INFO_ECX  CpuidVerEcx;
+
+  CHAR8                   HvVendor[13];
+  UINT64                  Msr;
 
   AsmCpuid (
     CPUID_VERSION_INFO,
@@ -454,7 +465,35 @@ InternalCalculateVMTFrequency (
   //  2. [Qemu-devel] [PATCH v2 0/3] x86-kvm: Fix Mac guest timekeeping by exposi:
   //     https://lists.gnu.org/archive/html/qemu-devel/2017-01/msg04344.html
   //
-  AsmCpuid (0x40000000, &CpuidEax, NULL, NULL, NULL);
+  // Hyper-V only implements MSRs for TSC and FSB frequencies in Hz.
+  // See https://docs.microsoft.com/en-us/virtualization/hyper-v-on-windows/reference/tlfs
+  //
+  AsmCpuid (0x40000000, &CpuidEax, &CpuidEbx, &CpuidEcx, &CpuidEdx);
+
+  CopyMem (&HvVendor[0], &CpuidEbx, sizeof (UINT32));
+  CopyMem (&HvVendor[4], &CpuidEcx, sizeof (UINT32));
+  CopyMem (&HvVendor[8], &CpuidEdx, sizeof (UINT32));
+  HvVendor[12] = '\0';
+
+  if (AsciiStrCmp (HvVendor, "Microsoft Hv") == 0) {
+    //
+    // HV_X64_MSR_APIC_FREQUENCY
+    //
+    Msr = AsmReadMsr64 (0x40000023);
+    if (FSBFrequency != NULL) {
+      *FSBFrequency = Msr;
+    }
+
+    //
+    // HV_X64_MSR_TSC_FREQUENCY
+    //
+    Msr = AsmReadMsr64 (0x40000022);
+    return Msr;
+  }
+
+  //
+  // Other hypervisors implement TSC/FSB frequency as an additional CPUID leaf.
+  //
   if (CpuidEax < 0x40000010) {
     return 0;
   }
@@ -486,7 +525,7 @@ OcGetTSCFrequency (
   // available (e.g. 300 series chipsets).
   // TODO: For AMD, the base clock can be determined from P-registers.
   //
-  InternalCalculateARTFrequencyIntel (&CPUFrequency, FALSE);
+  InternalCalculateARTFrequencyIntel (&CPUFrequency, NULL, FALSE);
   if (CPUFrequency == 0) {
     CPUFrequency = InternalCalculateVMTFrequency (NULL, NULL);
     if (CPUFrequency == 0) {

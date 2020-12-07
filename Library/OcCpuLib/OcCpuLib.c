@@ -22,7 +22,7 @@
 #include <Library/DebugLib.h>
 #include <Library/OcCpuLib.h>
 #include <Library/UefiBootServicesTableLib.h>
-#include <ProcessorInfo.h>
+#include <IndustryStandard/ProcessorInfo.h>
 #include <Register/Microcode.h>
 #include <Register/Msr.h>
 #include <Register/Intel/Msr/SandyBridgeMsr.h>
@@ -272,6 +272,26 @@ ScanThreadCount (
 
 STATIC
 VOID
+ScanIntelProcessorApple (
+  IN OUT OC_CPU_INFO  *Cpu
+  )
+{
+  UINT8  AppleMajorType;
+
+  AppleMajorType = InternalDetectAppleMajorType (Cpu->BrandString);
+  Cpu->AppleProcessorType = InternalDetectAppleProcessorType (
+                              Cpu->Model,
+                              Cpu->Stepping,
+                              AppleMajorType,
+                              Cpu->CoreCount,
+                              (Cpu->ExtFeatures & CPUID_EXTFEATURE_EM64T) != 0
+                              );
+
+  DEBUG ((DEBUG_INFO, "OCCPU: Detected Apple Processor Type: %02X -> %04X\n", AppleMajorType, Cpu->AppleProcessorType));
+}
+
+STATIC
+VOID
 ScanIntelProcessor (
   IN OUT OC_CPU_INFO  *Cpu
   )
@@ -279,7 +299,6 @@ ScanIntelProcessor (
   UINT64                                            Msr;
   CPUID_CACHE_PARAMS_EAX                            CpuidCacheEax;
   CPUID_CACHE_PARAMS_EBX                            CpuidCacheEbx;
-  UINT8                                             AppleMajorType;
   MSR_SANDY_BRIDGE_PKG_CST_CONFIG_CONTROL_REGISTER  PkgCstConfigControl;
   MSR_IA32_PERF_STATUS_REGISTER                     PerfStatus;
   MSR_NEHALEM_PLATFORM_INFO_REGISTER                PlatformInfo;
@@ -290,20 +309,24 @@ ScanIntelProcessor (
   UINTN                                             TimerAddr;
   BOOLEAN                                           Recalculate;
 
-  AppleMajorType = InternalDetectAppleMajorType (Cpu->BrandString);
-  Cpu->AppleProcessorType = InternalDetectAppleProcessorType (Cpu->Model, Cpu->Stepping, AppleMajorType);
-
-  DEBUG ((DEBUG_INFO, "OCCPU: Detected Apple Processor Type: %02X -> %04X\n", AppleMajorType, Cpu->AppleProcessorType));
-
   if ((Cpu->Family != 0x06 || Cpu->Model < 0x0c)
     && (Cpu->Family != 0x0f || Cpu->Model < 0x03)) {
+    ScanIntelProcessorApple (Cpu);
     return;
   }
 
-  if (Cpu->Model >= CPU_MODEL_SANDYBRIDGE) {
+  //
+  // Some virtual machines like QEMU 5.0 with KVM will fail to read this value.
+  // REF: https://github.com/acidanthera/bugtracker/issues/914
+  //
+  if (Cpu->Model >= CPU_MODEL_SANDYBRIDGE && !Cpu->Hypervisor) {
     PkgCstConfigControl.Uint64 = AsmReadMsr64 (MSR_SANDY_BRIDGE_PKG_CST_CONFIG_CONTROL);
     Cpu->CstConfigLock = PkgCstConfigControl.Bits.CFGLock == 1;
+  } else {
+    Cpu->CstConfigLock = FALSE;
   }
+
+  DEBUG ((DEBUG_INFO, "OCCPU: EIST CFG Lock %d\n", Cpu->CstConfigLock));
 
   //
   // When the CPU is virtualized and cpuid invtsc is enabled, then we already get
@@ -327,7 +350,7 @@ ScanIntelProcessor (
       } else {
         Cpu->CurBusRatio = (UINT8) (PerfStatus.Bits.State >> 8U);
       }
-    } else if (Cpu->Model >= CPU_MODEL_PENRYN) {
+    } else {
       PerfStatus.Uint64 = AsmReadMsr64 (MSR_IA32_PERF_STATUS);
       Cpu->MaxBusRatio = (UINT8) (RShiftU64 (PerfStatus.Uint64, 8) & 0x1FU);
       //
@@ -342,7 +365,9 @@ ScanIntelProcessor (
 
     if (Cpu->Model >= CPU_MODEL_NEHALEM
       && Cpu->Model != CPU_MODEL_NEHALEM_EX
-      && Cpu->Model != CPU_MODEL_WESTMERE_EX) {
+      && Cpu->Model != CPU_MODEL_WESTMERE_EX
+      && Cpu->Model != CPU_MODEL_BONNELL
+      && Cpu->Model != CPU_MODEL_BONNELL_MID) {
       TurboLimit.Uint64 = AsmReadMsr64 (MSR_NEHALEM_TURBO_RATIO_LIMIT);
       Cpu->TurboBusRatio1 = (UINT8) TurboLimit.Bits.Maximum1C;
       Cpu->TurboBusRatio2 = (UINT8) TurboLimit.Bits.Maximum2C;
@@ -376,7 +401,11 @@ ScanIntelProcessor (
     //
     // Determine our core crystal clock frequency
     //
-    Cpu->ARTFrequency = InternalCalculateARTFrequencyIntel (&Cpu->CPUFrequencyFromART, Recalculate);
+    Cpu->ARTFrequency = InternalCalculateARTFrequencyIntel (
+      &Cpu->CPUFrequencyFromART,
+      &Cpu->TscAdjust,
+      Recalculate
+      );
 
     //
     // Calculate the TSC frequency only if ART frequency is not available or we are in debug builds.
@@ -421,10 +450,14 @@ ScanIntelProcessor (
     }
   }
   //
-  // Calculate number of cores
+  // Calculate number of cores.
   // If we are under virtualization, then we should get the topology from CPUID the same was as with Penryn.
   //
-  if (Cpu->MaxId >= CPUID_CACHE_PARAMS && (Cpu->Model <= CPU_MODEL_PENRYN || Cpu->Hypervisor)) {
+  if (Cpu->MaxId >= CPUID_CACHE_PARAMS
+    && (Cpu->Model <= CPU_MODEL_PENRYN
+    || Cpu->Model == CPU_MODEL_BONNELL
+    || Cpu->Model == CPU_MODEL_BONNELL_MID
+    || Cpu->Hypervisor)) {
     AsmCpuidEx (CPUID_CACHE_PARAMS, 0, &CpuidCacheEax.Uint32, &CpuidCacheEbx.Uint32, NULL, NULL);
     if (CpuidCacheEax.Bits.CacheType != CPUID_CACHE_PARAMS_CACHE_TYPE_NULL) {
       CoreCount = (UINT16)GetPowerOfTwo32 (CpuidCacheEax.Bits.MaximumAddressableIdsForProcessorCores + 1);
@@ -444,6 +477,13 @@ ScanIntelProcessor (
     Msr = AsmReadMsr64 (MSR_CORE_THREAD_COUNT);
     Cpu->CoreCount   = (UINT16)BitFieldRead64 (Msr, 16, 19);
     Cpu->ThreadCount = (UINT16)BitFieldRead64 (Msr, 0,  15);
+  } else if (Cpu->Model == CPU_MODEL_BANIAS || Cpu->Model == CPU_MODEL_DOTHAN) {
+    //
+    // Banias and Dothan (Pentium M and Celeron M) never had
+    // multiple cores or threads, and do not support the MSR below.
+    //
+    Cpu->CoreCount   = 0;
+    Cpu->ThreadCount = 0;
   } else {
     Msr = AsmReadMsr64 (MSR_CORE_THREAD_COUNT);
     Cpu->CoreCount   = (UINT16)BitFieldRead64 (Msr, 16, 31);
@@ -457,6 +497,8 @@ ScanIntelProcessor (
   if (Cpu->ThreadCount == 0) {
     Cpu->ThreadCount = 1;
   }
+
+  ScanIntelProcessorApple (Cpu);
 }
 
 STATIC
@@ -517,6 +559,7 @@ ScanAmdProcessor (
 
     switch (Cpu->ExtFamily) {
       case AMD_CPU_EXT_FAMILY_17H:
+      case AMD_CPU_EXT_FAMILY_19H:
         if (Cpu->CPUFrequencyFromVMT == 0) {
           CofVid           = AsmReadMsr64 (K10_PSTATE_STATUS);
           CoreFrequencyID  = (UINT8)BitFieldRead64 (CofVid, 0, 7);
@@ -706,6 +749,21 @@ OcCpuScanProcessor (
     }
   }
 
+  //
+  // Get extended processor signature.
+  //
+  if (Cpu->MaxExtId >= CPUID_EXTENDED_CPU_SIG) {
+    AsmCpuid (
+      CPUID_EXTENDED_CPU_SIG,
+      &CpuidEax,
+      &CpuidEbx,
+      &Cpu->CpuidExtSigEcx.Uint32,
+      &Cpu->CpuidExtSigEdx.Uint32
+      );
+
+    Cpu->ExtFeatures = LShiftU64 (Cpu->CpuidExtSigEcx.Uint32, 32) | Cpu->CpuidExtSigEdx.Uint32;
+  }
+
   DEBUG ((DEBUG_INFO, "OCCPU: Found %a\n", Cpu->BrandString));
 
   DEBUG ((
@@ -758,7 +816,7 @@ OcCpuScanProcessor (
   } else if (Cpu->Vendor[0] == CPUID_VENDOR_AMD) {
     ScanAmdProcessor (Cpu);
   } else {
-    DEBUG ((DEBUG_WARN, "Found unsupported CPU vendor: %0X", Cpu->Vendor[0]));
+    DEBUG ((DEBUG_WARN, "OCCPU: Found unsupported CPU vendor: %0X", Cpu->Vendor[0]));
     return;
   }
 
@@ -835,6 +893,114 @@ OcCpuCorrectFlexRatio (
       }
     }
   }
+}
+
+STATIC
+VOID
+EFIAPI
+SyncTscOnCpu (
+  IN  VOID  *Buffer
+  )
+{
+  OC_CPU_TSC_SYNC   *Sync;
+  Sync = Buffer;
+  AsmIncrementUint32 (&Sync->CurrentCount);
+  while (Sync->CurrentCount < Sync->APThreadCount) {
+    //
+    // Busy-wait on AP CPU cores.
+    //
+  }
+  AsmWriteMsr64 (MSR_IA32_TIME_STAMP_COUNTER, Sync->Tsc);
+}
+
+STATIC
+VOID
+EFIAPI
+ResetAdjustTsc (
+  IN  VOID  *Buffer
+  )
+{
+  OC_CPU_TSC_SYNC   *Sync;
+  Sync = Buffer;
+  AsmIncrementUint32 (&Sync->CurrentCount);
+  while (Sync->CurrentCount < Sync->APThreadCount) {
+    //
+    // Busy-wait on AP CPU cores.
+    //
+  }
+  AsmWriteMsr64 (MSR_IA32_TSC_ADJUST, 0);
+}
+
+EFI_STATUS
+OcCpuCorrectTscSync (
+  IN OC_CPU_INFO   *Cpu,
+  IN UINTN         Timeout
+  )
+{
+  EFI_STATUS                          Status;
+  EFI_MP_SERVICES_PROTOCOL            *MpServices;
+  FRAMEWORK_EFI_MP_SERVICES_PROTOCOL  *FrameworkMpServices;
+  OC_CPU_TSC_SYNC                     Sync;
+  EFI_TPL                             OldTpl;
+  BOOLEAN                             InterruptState;
+
+  if (Cpu->ThreadCount <= 1) {
+    DEBUG ((DEBUG_INFO, "OCCPU: Thread count is too low for sync - %u\n", Cpu->ThreadCount));
+    return EFI_UNSUPPORTED;
+  }
+
+  Status = gBS->LocateProtocol (
+    &gEfiMpServiceProtocolGuid,
+    NULL,
+    (VOID **) &MpServices
+    );
+
+  if (EFI_ERROR (Status)) {
+    MpServices = NULL;
+    Status = gBS->LocateProtocol (
+      &gFrameworkEfiMpServiceProtocolGuid,
+      NULL,
+      (VOID **) &FrameworkMpServices
+      );
+
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_INFO, "OCCPU: Failed to find mp services - %r\n", Status));
+      return Status;
+    }
+  }
+
+  Sync.CurrentCount  = 0;
+  Sync.APThreadCount = Cpu->ThreadCount - 1;
+
+  OldTpl = gBS->RaiseTPL (TPL_HIGH_LEVEL);
+  InterruptState = SaveAndDisableInterrupts ();
+
+  if (Cpu->TscAdjust > 0) {
+    if (MpServices != NULL) {
+      Status = MpServices->StartupAllAPs (MpServices, ResetAdjustTsc, FALSE, NULL, Timeout, &Sync, NULL);
+    } else {
+      Status = FrameworkMpServices->StartupAllAPs (FrameworkMpServices, ResetAdjustTsc, FALSE, NULL, Timeout, &Sync, NULL);
+    }
+
+    AsmWriteMsr64 (MSR_IA32_TSC_ADJUST, 0);
+  } else {
+    Sync.Tsc = AsmReadTsc ();
+
+    if (MpServices != NULL) {
+      Status = MpServices->StartupAllAPs (MpServices, SyncTscOnCpu, FALSE, NULL, Timeout, &Sync, NULL);
+    } else {
+      Status = FrameworkMpServices->StartupAllAPs (FrameworkMpServices, SyncTscOnCpu, FALSE, NULL, Timeout, &Sync, NULL);
+    }
+
+    AsmWriteMsr64 (MSR_IA32_TIME_STAMP_COUNTER, Sync.Tsc);
+  }
+
+  SetInterruptState (InterruptState);
+  gBS->RestoreTPL (OldTpl);
+
+  DEBUG ((DEBUG_INFO, "OCCPU: Completed TSC sync with code - %r\n", Status));
+
+  return Status;
 }
 
 OC_CPU_GENERATION

@@ -69,7 +69,7 @@ STATIC GUI_DRAW_REQUEST              mDrawRequests[4]   = { { 0 } };
 //
 STATIC
 CONST UINT8
-mAppleDiskLabelImagePalette[256] = {
+gAppleDiskLabelImagePalette[256] = {
   [0x00] = 255,
   [0xf6] = 238,
   [0xf7] = 221,
@@ -167,16 +167,16 @@ GuiClipChildBounds (
 
 VOID
 GuiObjDrawDelegate (
-  IN OUT GUI_OBJ              *This,
-  IN OUT GUI_DRAWING_CONTEXT  *DrawContext,
-  IN     VOID                 *Context OPTIONAL,
-  IN     INT64                BaseX,
-  IN     INT64                BaseY,
-  IN     UINT32               OffsetX,
-  IN     UINT32               OffsetY,
-  IN     UINT32               Width,
-  IN     UINT32               Height,
-  IN     BOOLEAN              RequestDraw
+  IN OUT GUI_OBJ                 *This,
+  IN OUT GUI_DRAWING_CONTEXT     *DrawContext,
+  IN     BOOT_PICKER_GUI_CONTEXT *Context,
+  IN     INT64                   BaseX,
+  IN     INT64                   BaseY,
+  IN     UINT32                  OffsetX,
+  IN     UINT32                  OffsetY,
+  IN     UINT32                  Width,
+  IN     UINT32                  Height,
+  IN     BOOLEAN                 RequestDraw
   )
 {
   BOOLEAN       Result;
@@ -243,14 +243,14 @@ GuiObjDrawDelegate (
 
 GUI_OBJ *
 GuiObjDelegatePtrEvent (
-  IN OUT GUI_OBJ              *This,
-  IN OUT GUI_DRAWING_CONTEXT  *DrawContext,
-  IN     VOID                 *Context OPTIONAL,
-  IN     GUI_PTR_EVENT        Event,
-  IN     INT64                BaseX,
-  IN     INT64                BaseY,
-  IN     INT64                OffsetX,
-  IN     INT64                OffsetY
+  IN OUT GUI_OBJ                 *This,
+  IN OUT GUI_DRAWING_CONTEXT     *DrawContext,
+  IN     BOOT_PICKER_GUI_CONTEXT *Context,
+  IN     GUI_PTR_EVENT           Event,
+  IN     INT64                   BaseX,
+  IN     INT64                   BaseY,
+  IN     INT64                   OffsetX,
+  IN     INT64                   OffsetY
   )
 {
   GUI_OBJ       *Obj;
@@ -956,15 +956,16 @@ GuiRedrawAndFlushScreen (
 
 EFI_STATUS
 GuiLibConstruct (
-  IN UINT32  CursorDefaultX,
-  IN UINT32  CursorDefaultY
+  IN OC_PICKER_CONTEXT  *PickerContext,
+  IN UINT32             CursorDefaultX,
+  IN UINT32             CursorDefaultY
   )
 {
   CONST EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *OutputInfo;
 
   mOutputContext = GuiOutputConstruct ();
   if (mOutputContext == NULL) {
-    DEBUG ((DEBUG_ERROR, "OCUI: Failed to initialise output\n"));
+    DEBUG ((DEBUG_WARN, "OCUI: Failed to initialise output\n"));
     return EFI_UNSUPPORTED;
   }
 
@@ -975,16 +976,17 @@ GuiLibConstruct (
   CursorDefaultY = MIN (CursorDefaultY, OutputInfo->VerticalResolution   - 1);
 
   mPointerContext = GuiPointerConstruct (
-                      CursorDefaultX,
-                      CursorDefaultY,
-                      OutputInfo->HorizontalResolution,
-                      OutputInfo->VerticalResolution
-                      );
+    PickerContext,
+    CursorDefaultX,
+    CursorDefaultY,
+    OutputInfo->HorizontalResolution,
+    OutputInfo->VerticalResolution
+    );
   if (mPointerContext == NULL) {
     DEBUG ((DEBUG_WARN, "OCUI: Failed to initialise pointer\n"));
   }
 
-  mKeyContext = GuiKeyConstruct ();
+  mKeyContext = GuiKeyConstruct (PickerContext);
   if (mKeyContext == NULL) {
     DEBUG ((DEBUG_WARN, "OCUI: Failed to initialise key input\n"));
   }
@@ -997,7 +999,7 @@ GuiLibConstruct (
   mScreenBufferDelta = OutputInfo->HorizontalResolution * sizeof (*mScreenBuffer);
   mScreenBuffer      = AllocatePool (OutputInfo->VerticalResolution * mScreenBufferDelta);
   if (mScreenBuffer == NULL) {
-    DEBUG ((DEBUG_ERROR, "OCUI: GUI alloc failure\n"));
+    DEBUG ((DEBUG_WARN, "OCUI: GUI alloc failure\n"));
     GuiLibDestruct ();
     return EFI_OUT_OF_RESOURCES;
   }
@@ -1039,11 +1041,11 @@ GuiLibDestruct (
 
 VOID
 GuiViewInitialize (
-  OUT    GUI_DRAWING_CONTEXT   *DrawContext,
-  IN OUT GUI_OBJ               *Screen,
-  IN     GUI_CURSOR_GET_IMAGE  GetCursorImage,
-  IN     GUI_EXIT_LOOP         ExitLoop,
-  IN     VOID                  *GuiContext
+  OUT    GUI_DRAWING_CONTEXT     *DrawContext,
+  IN OUT GUI_OBJ                 *Screen,
+  IN     GUI_CURSOR_GET_IMAGE    GetCursorImage,
+  IN     GUI_EXIT_LOOP           ExitLoop,
+  IN     BOOT_PICKER_GUI_CONTEXT *GuiContext
   )
 {
   CONST EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *OutputInfo;
@@ -1128,7 +1130,8 @@ GuiDrawLoop (
   EFI_STATUS          Status;
   BOOLEAN             Result;
 
-  EFI_INPUT_KEY       InputKey;
+  INTN                InputKey;
+  BOOLEAN             Modifier;
   GUI_POINTER_STATE   PointerState;
   GUI_OBJ             *HoldObject;
   INT64               HoldObjBaseX;
@@ -1203,7 +1206,7 @@ GuiDrawLoop (
       //
       // Process key events. Only allow one key at a time for now.
       //
-      Status = GuiKeyRead (mKeyContext, &InputKey);
+      Status = GuiKeyRead (mKeyContext, &InputKey, &Modifier);
       if (!EFI_ERROR (Status)) {
         ASSERT (DrawContext->Screen->KeyEvent != NULL);
         DrawContext->Screen->KeyEvent (
@@ -1212,7 +1215,8 @@ GuiDrawLoop (
                                DrawContext->GuiContext,
                                0,
                                0,
-                               &InputKey
+                               InputKey,
+                               Modifier
                                );
         //
         // If detected key press then disable menu timeout
@@ -1254,6 +1258,26 @@ GuiDrawLoop (
       break;
     }
   } while (!DrawContext->ExitLoop (DrawContext->GuiContext));
+}
+
+VOID
+GuiClearScreen (
+  IN OUT GUI_DRAWING_CONTEXT           *DrawContext,
+  IN     EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Pixel
+  )
+{
+  GuiOutputBlt (
+    mOutputContext,
+    Pixel,
+    EfiBltVideoFill,
+    0,
+    0,
+    0,
+    0,
+    DrawContext->Screen->Width,
+    DrawContext->Screen->Height,
+    0
+    );
 }
 
 EFI_STATUS
@@ -1318,7 +1342,8 @@ GuiIcnsToImageIcon (
       Status = GuiPngToImage (
         Image,
         Record->Data,
-        RecordLength - sizeof (APPLE_ICNS_RECORD)
+        RecordLength - sizeof (APPLE_ICNS_RECORD),
+        TRUE
         );
 
       if (!EFI_ERROR (Status) && MatchWidth > 0 && MatchHeight > 0) {
@@ -1426,17 +1451,17 @@ GuiLabelToImage (
 
   if (Inverted) {
     for (PixelIdx = 0; PixelIdx < Image->Width * Image->Height; PixelIdx++) {
-      Image->Buffer[PixelIdx].Blue     = mAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
-      Image->Buffer[PixelIdx].Green    = mAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
-      Image->Buffer[PixelIdx].Red      = mAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
-      Image->Buffer[PixelIdx].Reserved = 255;
+      Image->Buffer[PixelIdx].Blue     = 0;
+      Image->Buffer[PixelIdx].Green    = 0;
+      Image->Buffer[PixelIdx].Red      = 0;
+      Image->Buffer[PixelIdx].Reserved = 255 -  gAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
     }
   } else {
     for (PixelIdx = 0; PixelIdx < Image->Width * Image->Height; PixelIdx++) {
-      Image->Buffer[PixelIdx].Blue     = 255 - mAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
-      Image->Buffer[PixelIdx].Green    = 255 - mAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
-      Image->Buffer[PixelIdx].Red      = 255 - mAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
-      Image->Buffer[PixelIdx].Reserved = 255;
+      Image->Buffer[PixelIdx].Blue     = 255 -  gAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
+      Image->Buffer[PixelIdx].Green    = 255 -  gAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
+      Image->Buffer[PixelIdx].Red      = 255 -  gAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
+      Image->Buffer[PixelIdx].Reserved = 255 -  gAppleDiskLabelImagePalette[Label->Data[PixelIdx]];
     }
   }
 
@@ -1447,7 +1472,8 @@ EFI_STATUS
 GuiPngToImage (
   OUT GUI_IMAGE  *Image,
   IN  VOID       *ImageData,
-  IN  UINT32     ImageDataSize
+  IN  UINTN      ImageDataSize,
+  IN  BOOLEAN    PremultiplyAlpha
   )
 {
   EFI_STATUS                       Status;
@@ -1455,7 +1481,7 @@ GuiPngToImage (
   UINTN                            Index;
   UINT8                            TmpChannel;
 
-  Status = DecodePng (
+  Status = OcDecodePng (
     ImageData,
     ImageDataSize,
     (VOID **) &Image->Buffer,
@@ -1469,13 +1495,15 @@ GuiPngToImage (
     return Status;
   }
 
-  BufferWalker = Image->Buffer;
-  for (Index = 0; Index < (UINTN) Image->Width * Image->Height; ++Index) {
-    TmpChannel             = (UINT8) ((BufferWalker->Blue * BufferWalker->Reserved) / 0xFF);
-    BufferWalker->Blue     = (UINT8) ((BufferWalker->Red * BufferWalker->Reserved) / 0xFF);
-    BufferWalker->Green    = (UINT8) ((BufferWalker->Green * BufferWalker->Reserved) / 0xFF);
-    BufferWalker->Red      = TmpChannel;
-    ++BufferWalker;
+  if (PremultiplyAlpha) {
+    BufferWalker = Image->Buffer;
+    for (Index = 0; Index < (UINTN) Image->Width * Image->Height; ++Index) {
+      TmpChannel             = (UINT8) ((BufferWalker->Blue * BufferWalker->Reserved) / 0xFF);
+      BufferWalker->Blue     = (UINT8) ((BufferWalker->Red * BufferWalker->Reserved) / 0xFF);
+      BufferWalker->Green    = (UINT8) ((BufferWalker->Green * BufferWalker->Reserved) / 0xFF);
+      BufferWalker->Red      = TmpChannel;
+      ++BufferWalker;
+    }
   }
 
   return EFI_SUCCESS;

@@ -3,13 +3,13 @@
 # Copyright (C) 2018, Download-Fritz.  All rights reserved.<BR>
 #
 # Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 ##
@@ -25,7 +25,13 @@
 
 [LibraryClasses]
   BaseLib|MdePkg/Library/BaseLib/BaseLib.inf
-  BaseMemoryLib|MdePkg/Library/BaseMemoryLibOptDxe/BaseMemoryLibOptDxe.inf
+  # We cannot use BaseMemoryLibOptDxe since it uses SSE instructions,
+  # and some types of firmware fail to properly maintain MMX register contexts
+  # across the timers. This results in exceptions when trying to execute
+  # primitives like CopyMem in timers (e.g. AIKDataWriteEntry).
+  # Reproduced on ASUS M5A97 with AMD FX8320 CPU.
+  # REF: https://github.com/acidanthera/bugtracker/issues/754
+  BaseMemoryLib|MdePkg/Library/BaseMemoryLibRepStr/BaseMemoryLibRepStr.inf
   BaseRngLib|MdePkg/Library/BaseRngLib/BaseRngLib.inf
   BcfgCommandLib|ShellPkg/Library/UefiShellBcfgCommandLib/UefiShellBcfgCommandLib.inf
   CpuLib|MdePkg/Library/BaseCpuLib/BaseCpuLib.inf
@@ -41,7 +47,6 @@
   HiiLib|MdeModulePkg/Library/UefiHiiLib/UefiHiiLib.inf
   HobLib|MdePkg/Library/DxeHobLib/DxeHobLib.inf
   IoLib|MdePkg/Library/BaseIoLibIntrinsic/BaseIoLibIntrinsic.inf
-  MacInfoLib|MacInfoPkg/Library/MacInfoLib/MacInfoLib.inf
   MemoryAllocationLib|MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
   OcAcpiLib|OpenCorePkg/Library/OcAcpiLib/OcAcpiLib.inf
   OcAfterBootCompatLib|OpenCorePkg/Library/OcAfterBootCompatLib/OcAfterBootCompatLib.inf
@@ -85,6 +90,7 @@
   OcHiiDatabaseLocalLib|OpenCorePkg/Library/OcHiiDatabaseLib/OcHiiDatabaseLocalLib.inf
   OcInputLib|OpenCorePkg/Library/OcInputLib/OcInputLib.inf
   OcMachoLib|OpenCorePkg/Library/OcMachoLib/OcMachoLib.inf
+  OcMacInfoLib|OpenCorePkg/Library/OcMacInfoLib/OcMacInfoLib.inf
   OcMemoryLib|OpenCorePkg/Library/OcMemoryLib/OcMemoryLib.inf
   OcMiscLib|OpenCorePkg/Library/OcMiscLib/OcMiscLib.inf
   OcOSInfoLib|OpenCorePkg/Library/OcOSInfoLib/OcOSInfoLib.inf
@@ -97,11 +103,12 @@
   OcStorageLib|OpenCorePkg/Library/OcStorageLib/OcStorageLib.inf
   OcStringLib|OpenCorePkg/Library/OcStringLib/OcStringLib.inf
   OcTemplateLib|OpenCorePkg/Library/OcTemplateLib/OcTemplateLib.inf
-  OcTimerLib|OpenCorePkg/Library/OcTimerLib/OcTimerLib.inf
+  TimerLib|OpenCorePkg/Library/OcTimerLib/OcTimerLib.inf
   OcUnicodeCollationEngGenericLib|OpenCorePkg/Library/OcUnicodeCollationEngLib/OcUnicodeCollationEngGenericLib.inf
   OcUnicodeCollationEngLocalLib|OpenCorePkg/Library/OcUnicodeCollationEngLib/OcUnicodeCollationEngLocalLib.inf
   OcVirtualFsLib|OpenCorePkg/Library/OcVirtualFsLib/OcVirtualFsLib.inf
   OcXmlLib|OpenCorePkg/Library/OcXmlLib/OcXmlLib.inf
+  OcPeCoffLib|OpenCorePkg/Library/OcPeCoffLib/OcPeCoffLib.inf
   PcdLib|MdePkg/Library/BasePcdLibNull/BasePcdLibNull.inf
   PciCf8Lib|MdePkg/Library/BasePciCf8Lib/BasePciCf8Lib.inf
   PciLib|MdePkg/Library/BasePciLibCf8/BasePciLibCf8.inf
@@ -114,6 +121,7 @@
   ShellCommandLib|ShellPkg/Library/UefiShellCommandLib/UefiShellCommandLib.inf
   ShellLib|ShellPkg/Library/UefiShellLib/UefiShellLib.inf
   SortLib|MdeModulePkg/Library/UefiSortLib/UefiSortLib.inf
+  SynchronizationLib|MdePkg/Library/BaseSynchronizationLib/BaseSynchronizationLib.inf
   UefiApplicationEntryPoint|MdePkg/Library/UefiApplicationEntryPoint/UefiApplicationEntryPoint.inf
   UefiBootServicesTableLib|MdePkg/Library/UefiBootServicesTableLib/UefiBootServicesTableLib.inf
   UefiBootManagerLib|MdeModulePkg/Library/UefiBootManagerLib/UefiBootManagerLib.inf
@@ -126,23 +134,20 @@
   !include NetworkPkg/NetworkLibs.dsc.inc
 
 [Components]
-  MdeModulePkg/Bus/Pci/NvmExpressDxe/NvmExpressDxe.inf{
+  MdeModulePkg/Bus/Pci/NvmExpressDxe/NvmExpressDxe.inf {
     <LibraryClasses>
       !if $(TARGET) == RELEASE
         DebugLib|MdePkg/Library/BaseDebugLibNull/BaseDebugLibNull.inf
       !endif
   }
-  MdeModulePkg/Bus/Pci/XhciDxe/XhciDxe.inf{
+  MdeModulePkg/Bus/Pci/XhciDxe/XhciDxe.inf {
     <LibraryClasses>
       !if $(TARGET) == RELEASE
         DebugLib|MdePkg/Library/BaseDebugLibNull/BaseDebugLibNull.inf
       !endif
   }
   MdeModulePkg/Bus/Isa/Ps2MouseDxe/Ps2MouseDxe.inf
-  MdeModulePkg/Bus/Isa/Ps2KeyboardDxe/Ps2KeyboardDxe.inf {
-    <LibraryClasses>
-      TimerLib|OpenCorePkg/Library/OcTimerLib/OcTimerLib.inf
-  }
+  MdeModulePkg/Bus/Isa/Ps2KeyboardDxe/Ps2KeyboardDxe.inf
   MdeModulePkg/Bus/Usb/UsbMouseDxe/UsbMouseDxe.inf
   MdeModulePkg/Universal/HiiDatabaseDxe/HiiDatabaseDxe.inf
   OpenCorePkg/Application/BootKicker/BootKicker.inf
@@ -157,6 +162,10 @@
   OpenCorePkg/Application/PavpProvision/PavpProvision.inf
   OpenCorePkg/Application/ResetSystem/ResetSystem.inf
   OpenCorePkg/Application/RtcRw/RtcRw.inf
+  OpenCorePkg/Application/VerifyMemOpt/VerifyMemOpt.inf {
+    <LibraryClasses>
+      BaseMemoryLib|MdePkg/Library/BaseMemoryLibOptDxe/BaseMemoryLibOptDxe.inf
+  }
   OpenCorePkg/Application/VerifyMsrE2/VerifyMsrE2.inf
   OpenCorePkg/Debug/GdbSyms/GdbSyms.inf
   OpenCorePkg/Library/OcAcpiLib/OcAcpiLib.inf
@@ -217,21 +226,20 @@
   OpenCorePkg/Library/OcUnicodeCollationEngLib/OcUnicodeCollationEngLocalLib.inf
   OpenCorePkg/Library/OcVirtualFsLib/OcVirtualFsLib.inf
   OpenCorePkg/Library/OcXmlLib/OcXmlLib.inf
+  OpenCorePkg/Library/OcPeCoffLib/OcPeCoffLib.inf
+  OpenCorePkg/Platform/CrScreenshotDxe/CrScreenshotDxe.inf
   OpenCorePkg/Platform/OpenCanopy/OpenCanopy.inf
   OpenCorePkg/Platform/OpenCore/OpenCore.inf
   OpenCorePkg/Platform/OpenRuntime/OpenRuntime.inf
   OpenCorePkg/Platform/OpenUsbKbDxe/UsbKbDxe.inf
+  OpenCorePkg/Staging/AudioDxe/AudioDxe.inf
+  OpenCorePkg/Staging/VBoxHfs/VBoxHfs.inf
   OpenCorePkg/Tests/AcpiTest/AcpiTest.inf
   OpenCorePkg/Tests/AcpiTest/AcpiTestApp.inf
-  OpenCorePkg/Tests/BlessTest/BlessTest.inf
-  OpenCorePkg/Tests/BlessTest/BlessTestApp.inf
   OpenCorePkg/Tests/CryptoTest/CryptoTest.inf
   OpenCorePkg/Tests/CryptoTest/CryptoTestApp.inf
   OpenCorePkg/Tests/DataHubTest/DataHubTest.inf
   OpenCorePkg/Tests/DataHubTest/DataHubTestApp.inf
-  OpenCorePkg/Tests/ExternalUi/ExternalUi.inf
-  OpenCorePkg/Tests/KernelTest/KernelTest.inf
-  OpenCorePkg/Tests/KernelTest/KernelTestApp.inf
   OpenCorePkg/Tests/PropertyTest/PropertyTest.inf
   OpenCorePkg/Tests/PropertyTest/PropertyTestApp.inf
   OpenCorePkg/Tests/SmbiosTest/SmbiosTest.inf
@@ -292,9 +300,9 @@
   GCC:DEBUG_*_*_CC_FLAGS     = -D OC_TARGET_DEBUG=1 $(OCPKG_BUILD_OPTIONS_GEN) $(OCPKG_ANAL_OPTIONS_GEN)
   GCC:NOOPT_*_*_CC_FLAGS     = -D OC_TARGET_NOOPT=1 $(OCPKG_BUILD_OPTIONS_GEN) $(OCPKG_ANAL_OPTIONS_GEN)
   GCC:RELEASE_*_*_CC_FLAGS   = -D OC_TARGET_RELEASE=1 $(OCPKG_BUILD_OPTIONS_GEN) $(OCPKG_ANAL_OPTIONS_GEN)
-  MSFT:DEBUG_*_*_CC_FLAGS    = -D OC_TARGET_DEBUG=1 $(OCPKG_BUILD_OPTIONS_GEN)
-  MSFT:NOOPT_*_*_CC_FLAGS    = -D OC_TARGET_NOOPT=1 $(OCPKG_BUILD_OPTIONS_GEN)
-  MSFT:RELEASE_*_*_CC_FLAGS  = -D OC_TARGET_RELEASE=1 $(OCPKG_BUILD_OPTIONS_GEN)
+  MSFT:DEBUG_*_*_CC_FLAGS    = -D OC_TARGET_DEBUG=1 $(OCPKG_BUILD_OPTIONS_GEN) /wd4723
+  MSFT:NOOPT_*_*_CC_FLAGS    = -D OC_TARGET_NOOPT=1 $(OCPKG_BUILD_OPTIONS_GEN) /wd4723
+  MSFT:RELEASE_*_*_CC_FLAGS  = -D OC_TARGET_RELEASE=1 $(OCPKG_BUILD_OPTIONS_GEN) /wd4723
   XCODE:DEBUG_*_*_CC_FLAGS   = -D OC_TARGET_DEBUG=1 $(OCPKG_BUILD_OPTIONS_GEN) $(OCPKG_ANAL_OPTIONS_GEN)
   XCODE:NOOPT_*_*_CC_FLAGS   = -D OC_TARGET_NOOPT=1 $(OCPKG_BUILD_OPTIONS_GEN) $(OCPKG_ANAL_OPTIONS_GEN)
   XCODE:RELEASE_*_*_CC_FLAGS = -D OC_TARGET_RELEASE=1 $(OCPKG_BUILD_OPTIONS_GEN) $(OCPKG_ANAL_OPTIONS_GEN) -Oz -flto

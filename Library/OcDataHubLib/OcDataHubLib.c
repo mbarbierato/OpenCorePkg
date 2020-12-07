@@ -14,7 +14,7 @@
 
 #include <Uefi.h>
 
-#include <ProcessorInfo.h>
+#include <IndustryStandard/ProcessorInfo.h>
 #include <IndustryStandard/Pci.h>
 
 #include <Guid/ApplePlatformInfo.h>
@@ -53,7 +53,7 @@ OcDataHubInstallProtocol (
   EFI_DATA_HUB_PROTOCOL  *DataHub;
 
   if (Reinstall) {
-    Status = UninstallAllProtocolInstances (&gEfiDataHubProtocolGuid);
+    Status = OcUninstallAllProtocolInstances (&gEfiDataHubProtocolGuid);
     if (EFI_ERROR (Status)) {
       DEBUG ((DEBUG_ERROR, "OCDH: Uninstall failed: %r\n", Status));
       return NULL;
@@ -114,7 +114,7 @@ DataHubSetAppleMiscUnicode (
   if (Value != NULL) {
     UnicodeValue = AsciiStrCopyToUnicode (Value, 0);
     if (UnicodeValue == NULL) {
-      DEBUG ((DEBUG_WARN, "Data Hub failed to allocate %s\n", Key));
+      DEBUG ((DEBUG_WARN, "OCDH: Data Hub failed to allocate %s\n", Key));
       return EFI_OUT_OF_RESOURCES;
     }
 
@@ -238,7 +238,7 @@ SetDataHubEntry (
 
   DEBUG ((
     EFI_ERROR (Status) ? DEBUG_WARN : DEBUG_INFO,
-    "Setting DataHub %g:%s (%u) - %r\n",
+    "OCDH: Setting DataHub %g:%s (%u) - %r\n",
     &gApplePlatformProducerNameGuid,
     Key,
     DataSize,
@@ -288,6 +288,11 @@ UpdateDataHub (
   DataHubSetAppleMiscData (DataHub, OC_SMC_REVISION, Data->SmcRevision, OC_SMC_REVISION_SIZE);
   DataHubSetAppleMiscData (DataHub, OC_SMC_BRANCH, Data->SmcBranch, OC_SMC_BRANCH_SIZE);
   DataHubSetAppleMiscData (DataHub, OC_SMC_PLATFORM, Data->SmcPlatform, OC_SMC_PLATFORM_SIZE);
+  //
+  // Should normally be 0x20000, but it will cause issues like Recovery OS not booting
+  // without real coprocessor hardware present.
+  //
+  DataHubSetAppleMiscData (DataHub, OC_COPROCESSOR_VERSION, Data->CoprocessorVersion, sizeof (*Data->CoprocessorVersion));
 
   return EFI_SUCCESS;
 }

@@ -148,7 +148,7 @@ ControlledClearScreen (
   UINTN                                 SizeOfInfo;
   EFI_GRAPHICS_OUTPUT_MODE_INFORMATION  *Info;
 
-  Status = gBS->HandleProtocol (
+  Status = OcHandleProtocolFallback (
     gST->ConsoleOutHandle,
     &gEfiGraphicsOutputProtocolGuid,
     (VOID **) &GraphicsOutput
@@ -257,7 +257,7 @@ ConsoleControlSetMode (
   mConsoleMode = Mode;
 
   if (mClearScreenOnModeSwitch && Mode == EfiConsoleControlScreenText) {
-    Status = gBS->HandleProtocol (
+    Status = OcHandleProtocolFallback (
       gST->ConsoleOutHandle,
       &gEfiGraphicsOutputProtocolGuid,
       (VOID **) &GraphicsOutput
@@ -292,7 +292,7 @@ ConsoleControlSetMode (
   //
   if (Mode == EfiConsoleControlScreenGraphics) {
     gST->ConOut->EnableCursor (gST->ConOut, FALSE);
-    gST->ConOut->SetCursorPosition (gST->ConOut, 0, 0);  
+    gST->ConOut->SetCursorPosition (gST->ConOut, 0, 0);
   }
 
   return EFI_SUCCESS;
@@ -324,7 +324,7 @@ mConsoleControlProtocol = {
   ConsoleControlLockStdIn
 };
 
-VOID
+EFI_STATUS
 OcUseSystemTextOutput (
   IN OC_CONSOLE_RENDERER          Renderer,
   IN BOOLEAN                      IgnoreTextOutput,
@@ -365,4 +365,6 @@ OcUseSystemTextOutput (
     mOriginalClearScreen      = gST->ConOut->ClearScreen;
     gST->ConOut->ClearScreen  = ControlledClearScreen;
   }
+
+  return EFI_SUCCESS;
 }

@@ -16,8 +16,8 @@
 
 OC_STRUCTORS       (OC_ACPI_ADD_ENTRY, ())
 OC_ARRAY_STRUCTORS (OC_ACPI_ADD_ARRAY)
-OC_STRUCTORS       (OC_ACPI_BLOCK_ENTRY, ())
-OC_ARRAY_STRUCTORS (OC_ACPI_BLOCK_ARRAY)
+OC_STRUCTORS       (OC_ACPI_DELETE_ENTRY, ())
+OC_ARRAY_STRUCTORS (OC_ACPI_DELETE_ARRAY)
 OC_STRUCTORS       (OC_ACPI_PATCH_ENTRY, ())
 OC_ARRAY_STRUCTORS (OC_ACPI_PATCH_ARRAY)
 OC_STRUCTORS       (OC_ACPI_QUIRKS, ())
@@ -29,8 +29,8 @@ OC_STRUCTORS       (OC_BOOTER_QUIRKS, ())
 OC_STRUCTORS       (OC_BOOTER_CONFIG, ())
 
 OC_MAP_STRUCTORS   (OC_DEV_PROP_ADD_MAP)
-OC_STRUCTORS       (OC_DEV_PROP_BLOCK_ENTRY, ())
-OC_MAP_STRUCTORS   (OC_DEV_PROP_BLOCK_MAP)
+OC_STRUCTORS       (OC_DEV_PROP_DELETE_ENTRY, ())
+OC_MAP_STRUCTORS   (OC_DEV_PROP_DELETE_MAP)
 OC_STRUCTORS       (OC_DEV_PROP_CONFIG, ())
 
 OC_STRUCTORS       (OC_KERNEL_ADD_ENTRY, ())
@@ -38,9 +38,11 @@ OC_ARRAY_STRUCTORS (OC_KERNEL_ADD_ARRAY)
 OC_STRUCTORS       (OC_KERNEL_BLOCK_ENTRY, ())
 OC_ARRAY_STRUCTORS (OC_KERNEL_BLOCK_ARRAY)
 OC_STRUCTORS       (OC_KERNEL_EMULATE, ())
+OC_ARRAY_STRUCTORS (OC_KERNEL_FORCE_ARRAY)
 OC_STRUCTORS       (OC_KERNEL_PATCH_ENTRY, ())
 OC_ARRAY_STRUCTORS (OC_KERNEL_PATCH_ARRAY)
 OC_STRUCTORS       (OC_KERNEL_QUIRKS, ())
+OC_STRUCTORS       (OC_KERNEL_SCHEME, ())
 OC_STRUCTORS       (OC_KERNEL_CONFIG, ())
 
 OC_ARRAY_STRUCTORS (OC_MISC_BLESS_ARRAY)
@@ -52,14 +54,17 @@ OC_ARRAY_STRUCTORS (OC_MISC_TOOLS_ARRAY)
 OC_STRUCTORS       (OC_MISC_CONFIG, ())
 
 OC_MAP_STRUCTORS   (OC_NVRAM_ADD_MAP)
-OC_STRUCTORS       (OC_NVRAM_BLOCK_ENTRY, ())
-OC_MAP_STRUCTORS   (OC_NVRAM_BLOCK_MAP)
+OC_STRUCTORS       (OC_NVRAM_DELETE_ENTRY, ())
+OC_MAP_STRUCTORS   (OC_NVRAM_DELETE_MAP)
 OC_STRUCTORS       (OC_NVRAM_LEGACY_ENTRY, ())
 OC_MAP_STRUCTORS   (OC_NVRAM_LEGACY_MAP)
 OC_STRUCTORS       (OC_NVRAM_CONFIG, ())
 
 OC_STRUCTORS       (OC_PLATFORM_GENERIC_CONFIG, ())
 OC_STRUCTORS       (OC_PLATFORM_DATA_HUB_CONFIG, ())
+OC_STRUCTORS       (OC_PLATFORM_MEMORY_DEVICE_ENTRY, ())
+OC_ARRAY_STRUCTORS (OC_PLATFORM_MEMORY_DEVICES_ARRAY)
+OC_STRUCTORS       (OC_PLATFORM_MEMORY_CONFIG, ())
 OC_STRUCTORS       (OC_PLATFORM_NVRAM_CONFIG, ())
 OC_STRUCTORS       (OC_PLATFORM_SMBIOS_CONFIG, ())
 OC_STRUCTORS       (OC_PLATFORM_CONFIG, ())
@@ -95,18 +100,18 @@ mAcpiAddSchema = OC_SCHEMA_DICT (NULL, mAcpiAddSchemaEntry);
 
 STATIC
 OC_SCHEMA
-mAcpiBlockSchemaEntry[] = {
-  OC_SCHEMA_BOOLEAN_IN   ("All",            OC_ACPI_BLOCK_ENTRY, All),
-  OC_SCHEMA_STRING_IN    ("Comment",        OC_ACPI_BLOCK_ENTRY, Comment),
-  OC_SCHEMA_BOOLEAN_IN   ("Enabled",        OC_ACPI_BLOCK_ENTRY, Enabled),
-  OC_SCHEMA_DATAF_IN     ("OemTableId",     OC_ACPI_BLOCK_ENTRY, OemTableId),
-  OC_SCHEMA_INTEGER_IN   ("TableLength",    OC_ACPI_BLOCK_ENTRY, TableLength),
-  OC_SCHEMA_DATAF_IN     ("TableSignature", OC_ACPI_BLOCK_ENTRY, TableSignature),
+mAcpiDeleteSchemaEntry[] = {
+  OC_SCHEMA_BOOLEAN_IN   ("All",            OC_ACPI_DELETE_ENTRY, All),
+  OC_SCHEMA_STRING_IN    ("Comment",        OC_ACPI_DELETE_ENTRY, Comment),
+  OC_SCHEMA_BOOLEAN_IN   ("Enabled",        OC_ACPI_DELETE_ENTRY, Enabled),
+  OC_SCHEMA_DATAF_IN     ("OemTableId",     OC_ACPI_DELETE_ENTRY, OemTableId),
+  OC_SCHEMA_INTEGER_IN   ("TableLength",    OC_ACPI_DELETE_ENTRY, TableLength),
+  OC_SCHEMA_DATAF_IN     ("TableSignature", OC_ACPI_DELETE_ENTRY, TableSignature),
 };
 
 STATIC
 OC_SCHEMA
-mAcpiBlockSchema = OC_SCHEMA_DICT (NULL, mAcpiBlockSchemaEntry);
+mAcpiDeleteSchema = OC_SCHEMA_DICT (NULL, mAcpiDeleteSchemaEntry);
 
 STATIC
 OC_SCHEMA
@@ -132,7 +137,6 @@ mAcpiPatchSchema = OC_SCHEMA_DICT (NULL, mAcpiPatchSchemaEntry);
 STATIC
 OC_SCHEMA
 mAcpiQuirksSchema[] = {
-  OC_SCHEMA_BOOLEAN_IN ("EnableForAll",     OC_GLOBAL_CONFIG, Acpi.Quirks.EnableForAll),
   OC_SCHEMA_BOOLEAN_IN ("FadtEnableReset",  OC_GLOBAL_CONFIG, Acpi.Quirks.FadtEnableReset),
   OC_SCHEMA_BOOLEAN_IN ("NormalizeHeaders", OC_GLOBAL_CONFIG, Acpi.Quirks.NormalizeHeaders),
   OC_SCHEMA_BOOLEAN_IN ("RebaseRegions",    OC_GLOBAL_CONFIG, Acpi.Quirks.RebaseRegions),
@@ -144,7 +148,7 @@ STATIC
 OC_SCHEMA
 mAcpiConfigurationSchema[] = {
   OC_SCHEMA_ARRAY_IN   ("Add",    OC_GLOBAL_CONFIG, Acpi.Add,    &mAcpiAddSchema),
-  OC_SCHEMA_ARRAY_IN   ("Block",  OC_GLOBAL_CONFIG, Acpi.Block,  &mAcpiBlockSchema),
+  OC_SCHEMA_ARRAY_IN   ("Delete", OC_GLOBAL_CONFIG, Acpi.Delete, &mAcpiDeleteSchema),
   OC_SCHEMA_ARRAY_IN   ("Patch",  OC_GLOBAL_CONFIG, Acpi.Patch,  &mAcpiPatchSchema),
   OC_SCHEMA_DICT       ("Quirks", mAcpiQuirksSchema),
 };
@@ -168,12 +172,12 @@ mBooterWhitelistSchema = OC_SCHEMA_DICT (NULL, mBooterWhitelistEntrySchema);
 STATIC
 OC_SCHEMA
 mBooterQuirksSchema[] = {
+  OC_SCHEMA_BOOLEAN_IN ("AllowRelocationBlock",   OC_GLOBAL_CONFIG, Booter.Quirks.AllowRelocationBlock),
   OC_SCHEMA_BOOLEAN_IN ("AvoidRuntimeDefrag",     OC_GLOBAL_CONFIG, Booter.Quirks.AvoidRuntimeDefrag),
   OC_SCHEMA_BOOLEAN_IN ("DevirtualiseMmio",       OC_GLOBAL_CONFIG, Booter.Quirks.DevirtualiseMmio),
   OC_SCHEMA_BOOLEAN_IN ("DisableSingleUser",      OC_GLOBAL_CONFIG, Booter.Quirks.DisableSingleUser),
   OC_SCHEMA_BOOLEAN_IN ("DisableVariableWrite",   OC_GLOBAL_CONFIG, Booter.Quirks.DisableVariableWrite),
   OC_SCHEMA_BOOLEAN_IN ("DiscardHibernateMap",    OC_GLOBAL_CONFIG, Booter.Quirks.DiscardHibernateMap),
-  OC_SCHEMA_BOOLEAN_IN ("EnableForAll",           OC_GLOBAL_CONFIG, Booter.Quirks.EnableForAll),
   OC_SCHEMA_BOOLEAN_IN ("EnableSafeModeSlide",    OC_GLOBAL_CONFIG, Booter.Quirks.EnableSafeModeSlide),
   OC_SCHEMA_BOOLEAN_IN ("EnableWriteUnprotector", OC_GLOBAL_CONFIG, Booter.Quirks.EnableWriteUnprotector),
   OC_SCHEMA_BOOLEAN_IN ("ForceExitBootServices",  OC_GLOBAL_CONFIG, Booter.Quirks.ForceExitBootServices),
@@ -181,6 +185,7 @@ mBooterQuirksSchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("ProtectSecureBoot",      OC_GLOBAL_CONFIG, Booter.Quirks.ProtectSecureBoot),
   OC_SCHEMA_BOOLEAN_IN ("ProtectUefiServices",    OC_GLOBAL_CONFIG, Booter.Quirks.ProtectUefiServices),
   OC_SCHEMA_BOOLEAN_IN ("ProvideCustomSlide",     OC_GLOBAL_CONFIG, Booter.Quirks.ProvideCustomSlide),
+  OC_SCHEMA_INTEGER_IN ("ProvideMaxSlide",        OC_GLOBAL_CONFIG, Booter.Quirks.ProvideMaxSlide),
   OC_SCHEMA_BOOLEAN_IN ("RebuildAppleMemoryMap",  OC_GLOBAL_CONFIG, Booter.Quirks.RebuildAppleMemoryMap),
   OC_SCHEMA_BOOLEAN_IN ("SetupVirtualMap",        OC_GLOBAL_CONFIG, Booter.Quirks.SetupVirtualMap),
   OC_SCHEMA_BOOLEAN_IN ("SignalAppleOS",          OC_GLOBAL_CONFIG, Booter.Quirks.SignalAppleOS),
@@ -210,17 +215,17 @@ mDevicePropertiesAddSchema = OC_SCHEMA_MAP (NULL, &mDevicePropertiesAddEntrySche
 
 STATIC
 OC_SCHEMA
-mDevicePropertiesBlockEntrySchema = OC_SCHEMA_STRING (NULL);
+mDevicePropertiesDeleteEntrySchema = OC_SCHEMA_STRING (NULL);
 
 STATIC
 OC_SCHEMA
-mDevicePropertiesBlockSchema = OC_SCHEMA_ARRAY (NULL, &mDevicePropertiesBlockEntrySchema);
+mDevicePropertiesDeleteSchema = OC_SCHEMA_ARRAY (NULL, &mDevicePropertiesDeleteEntrySchema);
 
 STATIC
 OC_SCHEMA
 mDevicePropertiesSchema[] = {
   OC_SCHEMA_MAP_IN      ("Add",                OC_GLOBAL_CONFIG, DeviceProperties.Add, &mDevicePropertiesAddSchema),
-  OC_SCHEMA_MAP_IN      ("Block",              OC_GLOBAL_CONFIG, DeviceProperties.Block, &mDevicePropertiesBlockSchema)
+  OC_SCHEMA_MAP_IN      ("Delete",             OC_GLOBAL_CONFIG, DeviceProperties.Delete, &mDevicePropertiesDeleteSchema)
 };
 
 //
@@ -230,6 +235,7 @@ mDevicePropertiesSchema[] = {
 STATIC
 OC_SCHEMA
 mKernelAddSchemaEntry[] = {
+  OC_SCHEMA_STRING_IN    ("Arch",           OC_KERNEL_ADD_ENTRY, Arch),
   OC_SCHEMA_STRING_IN    ("BundlePath",     OC_KERNEL_ADD_ENTRY, BundlePath),
   OC_SCHEMA_STRING_IN    ("Comment",        OC_KERNEL_ADD_ENTRY, Comment),
   OC_SCHEMA_BOOLEAN_IN   ("Enabled",        OC_KERNEL_ADD_ENTRY, Enabled),
@@ -246,6 +252,7 @@ mKernelAddSchema = OC_SCHEMA_DICT (NULL, mKernelAddSchemaEntry);
 STATIC
 OC_SCHEMA
 mKernelBlockSchemaEntry[] = {
+  OC_SCHEMA_STRING_IN    ("Arch",           OC_KERNEL_BLOCK_ENTRY, Arch),
   OC_SCHEMA_STRING_IN    ("Comment",        OC_KERNEL_BLOCK_ENTRY, Comment),
   OC_SCHEMA_BOOLEAN_IN   ("Enabled",        OC_KERNEL_BLOCK_ENTRY, Enabled),
   OC_SCHEMA_STRING_IN    ("Identifier",     OC_KERNEL_BLOCK_ENTRY, Identifier),
@@ -260,13 +267,35 @@ mKernelBlockSchema = OC_SCHEMA_DICT (NULL, mKernelBlockSchemaEntry);
 STATIC
 OC_SCHEMA
 mKernelEmulateSchema[] = {
-  OC_SCHEMA_DATAF_IN   ("Cpuid1Data",       OC_GLOBAL_CONFIG, Kernel.Emulate.Cpuid1Data),
-  OC_SCHEMA_DATAF_IN   ("Cpuid1Mask",       OC_GLOBAL_CONFIG, Kernel.Emulate.Cpuid1Mask),
+  OC_SCHEMA_DATAF_IN   ("Cpuid1Data",           OC_GLOBAL_CONFIG, Kernel.Emulate.Cpuid1Data),
+  OC_SCHEMA_DATAF_IN   ("Cpuid1Mask",           OC_GLOBAL_CONFIG, Kernel.Emulate.Cpuid1Mask),
+  OC_SCHEMA_BOOLEAN_IN ("DummyPowerManagement", OC_GLOBAL_CONFIG, Kernel.Emulate.DummyPowerManagement),
+  OC_SCHEMA_STRING_IN  ("MaxKernel",            OC_GLOBAL_CONFIG, Kernel.Emulate.MaxKernel),
+  OC_SCHEMA_STRING_IN  ("MinKernel",            OC_GLOBAL_CONFIG, Kernel.Emulate.MinKernel),
 };
 
 STATIC
 OC_SCHEMA
+mKernelForceSchemaEntry[] = {
+  OC_SCHEMA_STRING_IN    ("Arch",           OC_KERNEL_ADD_ENTRY, Arch),
+  OC_SCHEMA_STRING_IN    ("BundlePath",     OC_KERNEL_ADD_ENTRY, BundlePath),
+  OC_SCHEMA_STRING_IN    ("Comment",        OC_KERNEL_ADD_ENTRY, Comment),
+  OC_SCHEMA_BOOLEAN_IN   ("Enabled",        OC_KERNEL_ADD_ENTRY, Enabled),
+  OC_SCHEMA_STRING_IN    ("ExecutablePath", OC_KERNEL_ADD_ENTRY, ExecutablePath),
+  OC_SCHEMA_STRING_IN    ("Identifier",     OC_KERNEL_ADD_ENTRY, Identifier),
+  OC_SCHEMA_STRING_IN    ("MaxKernel",      OC_KERNEL_ADD_ENTRY, MaxKernel),
+  OC_SCHEMA_STRING_IN    ("MinKernel",      OC_KERNEL_ADD_ENTRY, MinKernel),
+  OC_SCHEMA_STRING_IN    ("PlistPath",      OC_KERNEL_ADD_ENTRY, PlistPath),
+};
+
+STATIC
+OC_SCHEMA
+mKernelForceSchema = OC_SCHEMA_DICT (NULL, mKernelForceSchemaEntry);
+
+STATIC
+OC_SCHEMA
 mKernelPatchSchemaEntry[] = {
+  OC_SCHEMA_STRING_IN    ("Arch",           OC_KERNEL_PATCH_ENTRY, Arch),
   OC_SCHEMA_STRING_IN    ("Base",           OC_KERNEL_PATCH_ENTRY, Base),
   OC_SCHEMA_STRING_IN    ("Comment",        OC_KERNEL_PATCH_ENTRY, Comment),
   OC_SCHEMA_INTEGER_IN   ("Count",          OC_KERNEL_PATCH_ENTRY, Count),
@@ -295,11 +324,14 @@ mKernelQuirksSchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("AppleXcpmForceBoost",     OC_GLOBAL_CONFIG, Kernel.Quirks.AppleXcpmForceBoost),
   OC_SCHEMA_BOOLEAN_IN ("CustomSMBIOSGuid",        OC_GLOBAL_CONFIG, Kernel.Quirks.CustomSmbiosGuid),
   OC_SCHEMA_BOOLEAN_IN ("DisableIoMapper",         OC_GLOBAL_CONFIG, Kernel.Quirks.DisableIoMapper),
+  OC_SCHEMA_BOOLEAN_IN ("DisableLinkeditJettison", OC_GLOBAL_CONFIG, Kernel.Quirks.DisableLinkeditJettison),
   OC_SCHEMA_BOOLEAN_IN ("DisableRtcChecksum",      OC_GLOBAL_CONFIG, Kernel.Quirks.DisableRtcChecksum),
-  OC_SCHEMA_BOOLEAN_IN ("DummyPowerManagement",    OC_GLOBAL_CONFIG, Kernel.Quirks.DummyPowerManagement),
+  OC_SCHEMA_BOOLEAN_IN ("ExtendBTFeatureFlags",    OC_GLOBAL_CONFIG, Kernel.Quirks.ExtendBTFeatureFlags),
   OC_SCHEMA_BOOLEAN_IN ("ExternalDiskIcons",       OC_GLOBAL_CONFIG, Kernel.Quirks.ExternalDiskIcons),
+  OC_SCHEMA_BOOLEAN_IN ("ForceSecureBootScheme",   OC_GLOBAL_CONFIG, Kernel.Quirks.ForceSecureBootScheme),
   OC_SCHEMA_BOOLEAN_IN ("IncreasePciBarSize",      OC_GLOBAL_CONFIG, Kernel.Quirks.IncreasePciBarSize),
   OC_SCHEMA_BOOLEAN_IN ("LapicKernelPanic",        OC_GLOBAL_CONFIG, Kernel.Quirks.LapicKernelPanic),
+  OC_SCHEMA_BOOLEAN_IN ("LegacyCommpage",          OC_GLOBAL_CONFIG, Kernel.Quirks.LegacyCommpage),
   OC_SCHEMA_BOOLEAN_IN ("PanicNoKextDump",         OC_GLOBAL_CONFIG, Kernel.Quirks.PanicNoKextDump),
   OC_SCHEMA_BOOLEAN_IN ("PowerTimeoutKernelPanic", OC_GLOBAL_CONFIG, Kernel.Quirks.PowerTimeoutKernelPanic),
   OC_SCHEMA_BOOLEAN_IN ("ThirdPartyDrives",        OC_GLOBAL_CONFIG, Kernel.Quirks.ThirdPartyDrives),
@@ -308,12 +340,22 @@ mKernelQuirksSchema[] = {
 
 STATIC
 OC_SCHEMA
+mKernelSchemeSchema[] = {
+  OC_SCHEMA_BOOLEAN_IN ("FuzzyMatch",         OC_GLOBAL_CONFIG, Kernel.Scheme.FuzzyMatch),
+  OC_SCHEMA_STRING_IN  ("KernelArch",         OC_GLOBAL_CONFIG, Kernel.Scheme.KernelArch),
+  OC_SCHEMA_STRING_IN  ("KernelCache",        OC_GLOBAL_CONFIG, Kernel.Scheme.KernelCache),
+};
+
+STATIC
+OC_SCHEMA
 mKernelConfigurationSchema[] = {
   OC_SCHEMA_ARRAY_IN   ("Add",     OC_GLOBAL_CONFIG, Kernel.Add, &mKernelAddSchema),
   OC_SCHEMA_ARRAY_IN   ("Block",   OC_GLOBAL_CONFIG, Kernel.Block, &mKernelBlockSchema),
   OC_SCHEMA_DICT       ("Emulate", mKernelEmulateSchema),
+  OC_SCHEMA_ARRAY_IN   ("Force",   OC_GLOBAL_CONFIG, Kernel.Force, &mKernelForceSchema),
   OC_SCHEMA_ARRAY_IN   ("Patch",   OC_GLOBAL_CONFIG, Kernel.Patch, &mKernelPatchSchema),
   OC_SCHEMA_DICT       ("Quirks",  mKernelQuirksSchema),
+  OC_SCHEMA_DICT       ("Scheme",  mKernelSchemeSchema),
 };
 
 //
@@ -327,27 +369,28 @@ mMiscBlessOverrideSchema = OC_SCHEMA_STRING (NULL);
 STATIC
 OC_SCHEMA
 mMiscConfigurationBootSchema[] = {
-  OC_SCHEMA_INTEGER_IN ("ConsoleAttributes",    OC_GLOBAL_CONFIG, Misc.Boot.ConsoleAttributes),
-  OC_SCHEMA_STRING_IN  ("HibernateMode",        OC_GLOBAL_CONFIG, Misc.Boot.HibernateMode),
-  OC_SCHEMA_BOOLEAN_IN ("HideAuxiliary",        OC_GLOBAL_CONFIG, Misc.Boot.HideAuxiliary),
-  OC_SCHEMA_BOOLEAN_IN ("HideSelf",             OC_GLOBAL_CONFIG, Misc.Boot.HideSelf),
-  OC_SCHEMA_INTEGER_IN ("PickerAttributes",     OC_GLOBAL_CONFIG, Misc.Boot.PickerAttributes),
-  OC_SCHEMA_BOOLEAN_IN ("PickerAudioAssist",    OC_GLOBAL_CONFIG, Misc.Boot.PickerAudioAssist),
-  OC_SCHEMA_STRING_IN  ("PickerMode",           OC_GLOBAL_CONFIG, Misc.Boot.PickerMode),
-  OC_SCHEMA_BOOLEAN_IN ("PollAppleHotKeys",     OC_GLOBAL_CONFIG, Misc.Boot.PollAppleHotKeys),
-  OC_SCHEMA_BOOLEAN_IN ("ShowPicker",           OC_GLOBAL_CONFIG, Misc.Boot.ShowPicker),
-  OC_SCHEMA_BOOLEAN_IN ("SkipCustomEntryCheck", OC_GLOBAL_CONFIG, Misc.Boot.SkipCustomEntryCheck),
-  OC_SCHEMA_INTEGER_IN ("TakeoffDelay",         OC_GLOBAL_CONFIG, Misc.Boot.TakeoffDelay),
-  OC_SCHEMA_INTEGER_IN ("Timeout",              OC_GLOBAL_CONFIG, Misc.Boot.Timeout),
+  OC_SCHEMA_INTEGER_IN ("ConsoleAttributes",   OC_GLOBAL_CONFIG, Misc.Boot.ConsoleAttributes),
+  OC_SCHEMA_STRING_IN  ("HibernateMode",       OC_GLOBAL_CONFIG, Misc.Boot.HibernateMode),
+  OC_SCHEMA_BOOLEAN_IN ("HideAuxiliary",       OC_GLOBAL_CONFIG, Misc.Boot.HideAuxiliary),
+  OC_SCHEMA_INTEGER_IN ("PickerAttributes",    OC_GLOBAL_CONFIG, Misc.Boot.PickerAttributes),
+  OC_SCHEMA_BOOLEAN_IN ("PickerAudioAssist",   OC_GLOBAL_CONFIG, Misc.Boot.PickerAudioAssist),
+  OC_SCHEMA_STRING_IN  ("PickerMode",          OC_GLOBAL_CONFIG, Misc.Boot.PickerMode),
+  OC_SCHEMA_BOOLEAN_IN ("PollAppleHotKeys",    OC_GLOBAL_CONFIG, Misc.Boot.PollAppleHotKeys),
+  OC_SCHEMA_BOOLEAN_IN ("ShowPicker",          OC_GLOBAL_CONFIG, Misc.Boot.ShowPicker),
+  OC_SCHEMA_INTEGER_IN ("TakeoffDelay",        OC_GLOBAL_CONFIG, Misc.Boot.TakeoffDelay),
+  OC_SCHEMA_INTEGER_IN ("Timeout",             OC_GLOBAL_CONFIG, Misc.Boot.Timeout),
 };
 
 STATIC
 OC_SCHEMA
 mMiscConfigurationDebugSchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("AppleDebug",       OC_GLOBAL_CONFIG, Misc.Debug.AppleDebug),
+  OC_SCHEMA_BOOLEAN_IN ("ApplePanic",       OC_GLOBAL_CONFIG, Misc.Debug.ApplePanic),
   OC_SCHEMA_BOOLEAN_IN ("DisableWatchDog",  OC_GLOBAL_CONFIG, Misc.Debug.DisableWatchDog),
   OC_SCHEMA_INTEGER_IN ("DisplayDelay",     OC_GLOBAL_CONFIG, Misc.Debug.DisplayDelay),
   OC_SCHEMA_INTEGER_IN ("DisplayLevel",     OC_GLOBAL_CONFIG, Misc.Debug.DisplayLevel),
+  OC_SCHEMA_BOOLEAN_IN ("SerialInit",       OC_GLOBAL_CONFIG, Misc.Debug.SerialInit),
+  OC_SCHEMA_BOOLEAN_IN ("SysReport",        OC_GLOBAL_CONFIG, Misc.Debug.SysReport),
   OC_SCHEMA_INTEGER_IN ("Target",           OC_GLOBAL_CONFIG, Misc.Debug.Target)
 };
 
@@ -356,16 +399,36 @@ OC_SCHEMA
 mMiscConfigurationSecuritySchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("AllowNvramReset",      OC_GLOBAL_CONFIG, Misc.Security.AllowNvramReset),
   OC_SCHEMA_BOOLEAN_IN ("AllowSetDefault",      OC_GLOBAL_CONFIG, Misc.Security.AllowSetDefault),
+  OC_SCHEMA_INTEGER_IN ("ApECID",               OC_GLOBAL_CONFIG, Misc.Security.ApECID),
   OC_SCHEMA_BOOLEAN_IN ("AuthRestart",          OC_GLOBAL_CONFIG, Misc.Security.AuthRestart),
+  OC_SCHEMA_BOOLEAN_IN ("BlacklistAppleUpdate", OC_GLOBAL_CONFIG, Misc.Security.BlacklistAppleUpdate),
   OC_SCHEMA_STRING_IN  ("BootProtect",          OC_GLOBAL_CONFIG, Misc.Security.BootProtect),
+  OC_SCHEMA_STRING_IN  ("DmgLoading",           OC_GLOBAL_CONFIG, Misc.Security.DmgLoading),
   OC_SCHEMA_BOOLEAN_IN ("EnablePassword",       OC_GLOBAL_CONFIG, Misc.Security.EnablePassword),
   OC_SCHEMA_INTEGER_IN ("ExposeSensitiveData",  OC_GLOBAL_CONFIG, Misc.Security.ExposeSensitiveData),
   OC_SCHEMA_INTEGER_IN ("HaltLevel",            OC_GLOBAL_CONFIG, Misc.Security.HaltLevel),
   OC_SCHEMA_DATAF_IN   ("PasswordHash",         OC_GLOBAL_CONFIG, Misc.Security.PasswordHash),
   OC_SCHEMA_DATA_IN    ("PasswordSalt",         OC_GLOBAL_CONFIG, Misc.Security.PasswordSalt),
   OC_SCHEMA_INTEGER_IN ("ScanPolicy",           OC_GLOBAL_CONFIG, Misc.Security.ScanPolicy),
+  OC_SCHEMA_STRING_IN  ("SecureBootModel",      OC_GLOBAL_CONFIG, Misc.Security.SecureBootModel),
   OC_SCHEMA_STRING_IN  ("Vault",                OC_GLOBAL_CONFIG, Misc.Security.Vault),
 };
+
+STATIC
+OC_SCHEMA
+mMiscEntriesSchemaEntry[] = {
+  OC_SCHEMA_STRING_IN  ("Arguments", OC_MISC_TOOLS_ENTRY, Arguments),
+  OC_SCHEMA_BOOLEAN_IN ("Auxiliary", OC_MISC_TOOLS_ENTRY, Auxiliary),
+  OC_SCHEMA_STRING_IN  ("Comment",   OC_MISC_TOOLS_ENTRY, Comment),
+  OC_SCHEMA_BOOLEAN_IN ("Enabled",   OC_MISC_TOOLS_ENTRY, Enabled),
+  OC_SCHEMA_STRING_IN  ("Name",      OC_MISC_TOOLS_ENTRY, Name),
+  OC_SCHEMA_STRING_IN  ("Path",      OC_MISC_TOOLS_ENTRY, Path),
+  OC_SCHEMA_BOOLEAN_IN ("TextMode",  OC_MISC_TOOLS_ENTRY, TextMode),
+};
+
+STATIC
+OC_SCHEMA
+mMiscEntriesSchema = OC_SCHEMA_DICT (NULL, mMiscEntriesSchemaEntry);
 
 STATIC
 OC_SCHEMA
@@ -376,6 +439,8 @@ mMiscToolsSchemaEntry[] = {
   OC_SCHEMA_BOOLEAN_IN ("Enabled",   OC_MISC_TOOLS_ENTRY, Enabled),
   OC_SCHEMA_STRING_IN  ("Name",      OC_MISC_TOOLS_ENTRY, Name),
   OC_SCHEMA_STRING_IN  ("Path",      OC_MISC_TOOLS_ENTRY, Path),
+  OC_SCHEMA_BOOLEAN_IN ("RealPath",  OC_MISC_TOOLS_ENTRY, RealPath),
+  OC_SCHEMA_BOOLEAN_IN ("TextMode",  OC_MISC_TOOLS_ENTRY, TextMode),
 };
 
 STATIC
@@ -388,7 +453,7 @@ mMiscConfigurationSchema[] = {
   OC_SCHEMA_ARRAY_IN   ("BlessOverride",    OC_GLOBAL_CONFIG, Misc.BlessOverride, &mMiscBlessOverrideSchema),
   OC_SCHEMA_DICT       ("Boot",             mMiscConfigurationBootSchema),
   OC_SCHEMA_DICT       ("Debug",            mMiscConfigurationDebugSchema),
-  OC_SCHEMA_ARRAY_IN   ("Entries",          OC_GLOBAL_CONFIG, Misc.Entries, &mMiscToolsSchema),
+  OC_SCHEMA_ARRAY_IN   ("Entries",          OC_GLOBAL_CONFIG, Misc.Entries, &mMiscEntriesSchema),
   OC_SCHEMA_DICT       ("Security",         mMiscConfigurationSecuritySchema),
   OC_SCHEMA_ARRAY_IN   ("Tools",            OC_GLOBAL_CONFIG, Misc.Tools, &mMiscToolsSchema),
 };
@@ -407,11 +472,11 @@ mNvramAddSchema = OC_SCHEMA_MAP (NULL, &mNvramAddEntrySchema);
 
 STATIC
 OC_SCHEMA
-mNvramBlockEntrySchema = OC_SCHEMA_STRING (NULL);
+mNvramDeleteEntrySchema = OC_SCHEMA_STRING (NULL);
 
 STATIC
 OC_SCHEMA
-mNvramBlockSchema = OC_SCHEMA_ARRAY (NULL, &mNvramBlockEntrySchema);
+mNvramDeleteSchema = OC_SCHEMA_ARRAY (NULL, &mNvramDeleteEntrySchema);
 
 STATIC
 OC_SCHEMA
@@ -425,7 +490,7 @@ STATIC
 OC_SCHEMA
 mNvramConfigurationSchema[] = {
   OC_SCHEMA_MAP_IN     ("Add",             OC_GLOBAL_CONFIG, Nvram.Add, &mNvramAddSchema),
-  OC_SCHEMA_MAP_IN     ("Block",           OC_GLOBAL_CONFIG, Nvram.Block, &mNvramBlockSchema),
+  OC_SCHEMA_MAP_IN     ("Delete",          OC_GLOBAL_CONFIG, Nvram.Delete, &mNvramDeleteSchema),
   OC_SCHEMA_BOOLEAN_IN ("LegacyEnable",    OC_GLOBAL_CONFIG, Nvram.LegacyEnable),
   OC_SCHEMA_BOOLEAN_IN ("LegacyOverwrite", OC_GLOBAL_CONFIG, Nvram.LegacyOverwrite),
   OC_SCHEMA_MAP_IN     ("LegacySchema",    OC_GLOBAL_CONFIG, Nvram.Legacy, &mNvramLegacySchema),
@@ -459,11 +524,43 @@ OC_SCHEMA
 mPlatformConfigurationGenericSchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("AdviseWindows",      OC_GLOBAL_CONFIG, PlatformInfo.Generic.AdviseWindows),
   OC_SCHEMA_STRING_IN  ("MLB",                OC_GLOBAL_CONFIG, PlatformInfo.Generic.Mlb),
+  OC_SCHEMA_INTEGER_IN ("ProcessorType",      OC_GLOBAL_CONFIG, PlatformInfo.Generic.ProcessorType),
   OC_SCHEMA_DATAF_IN   ("ROM",                OC_GLOBAL_CONFIG, PlatformInfo.Generic.Rom),
   OC_SCHEMA_BOOLEAN_IN ("SpoofVendor",        OC_GLOBAL_CONFIG, PlatformInfo.Generic.SpoofVendor),
+  OC_SCHEMA_STRING_IN  ("SystemMemoryStatus", OC_GLOBAL_CONFIG, PlatformInfo.Generic.SystemMemoryStatus),
   OC_SCHEMA_STRING_IN  ("SystemProductName",  OC_GLOBAL_CONFIG, PlatformInfo.Generic.SystemProductName),
   OC_SCHEMA_STRING_IN  ("SystemSerialNumber", OC_GLOBAL_CONFIG, PlatformInfo.Generic.SystemSerialNumber),
   OC_SCHEMA_STRING_IN  ("SystemUUID",         OC_GLOBAL_CONFIG, PlatformInfo.Generic.SystemUuid),
+};
+
+STATIC
+OC_SCHEMA
+mPlatformConfigurationMemoryDeviceEntry[] = {
+  OC_SCHEMA_STRING_IN  ("AssetTag",      OC_PLATFORM_MEMORY_DEVICE_ENTRY, AssetTag),
+  OC_SCHEMA_STRING_IN  ("BankLocator",   OC_PLATFORM_MEMORY_DEVICE_ENTRY, BankLocator),
+  OC_SCHEMA_STRING_IN  ("DeviceLocator", OC_PLATFORM_MEMORY_DEVICE_ENTRY, DeviceLocator),
+  OC_SCHEMA_STRING_IN  ("Manufacturer",  OC_PLATFORM_MEMORY_DEVICE_ENTRY, Manufacturer),
+  OC_SCHEMA_STRING_IN  ("PartNumber",    OC_PLATFORM_MEMORY_DEVICE_ENTRY, PartNumber),
+  OC_SCHEMA_STRING_IN  ("SerialNumber",  OC_PLATFORM_MEMORY_DEVICE_ENTRY, SerialNumber),
+  OC_SCHEMA_INTEGER_IN ("Size",          OC_PLATFORM_MEMORY_DEVICE_ENTRY, Size),
+  OC_SCHEMA_INTEGER_IN ("Speed",         OC_PLATFORM_MEMORY_DEVICE_ENTRY, Speed)
+};
+
+STATIC
+OC_SCHEMA
+mPlatformConfigurationMemoryDevicesSchema = OC_SCHEMA_DICT (NULL, mPlatformConfigurationMemoryDeviceEntry);
+
+STATIC
+OC_SCHEMA
+mPlatformConfigurationMemorySchema[] = {
+  OC_SCHEMA_INTEGER_IN ("DataWidth",       OC_GLOBAL_CONFIG, PlatformInfo.Memory.DataWidth),
+  OC_SCHEMA_ARRAY_IN   ("Devices",         OC_GLOBAL_CONFIG, PlatformInfo.Memory.Devices, &mPlatformConfigurationMemoryDevicesSchema),
+  OC_SCHEMA_INTEGER_IN ("ErrorCorrection", OC_GLOBAL_CONFIG, PlatformInfo.Memory.ErrorCorrection),
+  OC_SCHEMA_INTEGER_IN ("FormFactor",      OC_GLOBAL_CONFIG, PlatformInfo.Memory.FormFactor),
+  OC_SCHEMA_INTEGER_IN ("MaxCapacity",     OC_GLOBAL_CONFIG, PlatformInfo.Memory.MaxCapacity),
+  OC_SCHEMA_INTEGER_IN ("TotalWidth",      OC_GLOBAL_CONFIG, PlatformInfo.Memory.TotalWidth),
+  OC_SCHEMA_INTEGER_IN ("Type",            OC_GLOBAL_CONFIG, PlatformInfo.Memory.Type),
+  OC_SCHEMA_INTEGER_IN ("TypeDetail",      OC_GLOBAL_CONFIG, PlatformInfo.Memory.TypeDetail)
 };
 
 STATIC
@@ -473,7 +570,8 @@ mPlatformConfigurationNvramSchema[] = {
   OC_SCHEMA_DATAF_IN  ("FirmwareFeatures",     OC_GLOBAL_CONFIG, PlatformInfo.Nvram.FirmwareFeatures),
   OC_SCHEMA_DATAF_IN  ("FirmwareFeaturesMask", OC_GLOBAL_CONFIG, PlatformInfo.Nvram.FirmwareFeaturesMask),
   OC_SCHEMA_STRING_IN ("MLB",                  OC_GLOBAL_CONFIG, PlatformInfo.Nvram.Mlb),
-  OC_SCHEMA_DATAF_IN  ("ROM",                  OC_GLOBAL_CONFIG, PlatformInfo.Nvram.Rom)
+  OC_SCHEMA_DATAF_IN  ("ROM",                  OC_GLOBAL_CONFIG, PlatformInfo.Nvram.Rom),
+  OC_SCHEMA_STRING_IN ("SystemUUID",           OC_GLOBAL_CONFIG, PlatformInfo.Nvram.SystemUuid),
 };
 
 STATIC
@@ -496,7 +594,6 @@ mPlatformConfigurationSmbiosSchema[] = {
   OC_SCHEMA_STRING_IN  ("ChassisVersion",         OC_GLOBAL_CONFIG, PlatformInfo.Smbios.ChassisVersion),
   OC_SCHEMA_DATAF_IN   ("FirmwareFeatures",       OC_GLOBAL_CONFIG, PlatformInfo.Smbios.FirmwareFeatures),
   OC_SCHEMA_DATAF_IN   ("FirmwareFeaturesMask",   OC_GLOBAL_CONFIG, PlatformInfo.Smbios.FirmwareFeaturesMask),
-  OC_SCHEMA_INTEGER_IN ("MemoryFormFactor",       OC_GLOBAL_CONFIG, PlatformInfo.Smbios.MemoryFormFactor),
   OC_SCHEMA_INTEGER_IN ("PlatformFeature",        OC_GLOBAL_CONFIG, PlatformInfo.Smbios.PlatformFeature),
   OC_SCHEMA_INTEGER_IN ("ProcessorType",          OC_GLOBAL_CONFIG, PlatformInfo.Smbios.ProcessorType),
   OC_SCHEMA_DATAF_IN   ("SmcVersion",             OC_GLOBAL_CONFIG, PlatformInfo.Smbios.SmcVersion),
@@ -513,10 +610,12 @@ STATIC
 OC_SCHEMA
 mPlatformConfigurationSchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("Automatic",        OC_GLOBAL_CONFIG, PlatformInfo.Automatic),
-  OC_SCHEMA_DICT       ("DataHub",          mPlatformConfigurationDataHubSchema),
+  OC_SCHEMA_BOOLEAN_IN ("CustomMemory",     OC_GLOBAL_CONFIG, PlatformInfo.CustomMemory),
+  OC_SCHEMA_DICT_OPT   ("DataHub",          mPlatformConfigurationDataHubSchema),
   OC_SCHEMA_DICT       ("Generic",          mPlatformConfigurationGenericSchema),
-  OC_SCHEMA_DICT       ("PlatformNVRAM",    mPlatformConfigurationNvramSchema),
-  OC_SCHEMA_DICT       ("SMBIOS",           mPlatformConfigurationSmbiosSchema),
+  OC_SCHEMA_DICT_OPT   ("Memory",           mPlatformConfigurationMemorySchema),
+  OC_SCHEMA_DICT_OPT   ("PlatformNVRAM",    mPlatformConfigurationNvramSchema),
+  OC_SCHEMA_DICT_OPT   ("SMBIOS",           mPlatformConfigurationSmbiosSchema),
   OC_SCHEMA_BOOLEAN_IN ("UpdateDataHub",    OC_GLOBAL_CONFIG, PlatformInfo.UpdateDataHub),
   OC_SCHEMA_BOOLEAN_IN ("UpdateNVRAM",      OC_GLOBAL_CONFIG, PlatformInfo.UpdateNvram),
   OC_SCHEMA_BOOLEAN_IN ("UpdateSMBIOS",     OC_GLOBAL_CONFIG, PlatformInfo.UpdateSmbios),
@@ -534,11 +633,12 @@ mUefiDriversSchema = OC_SCHEMA_STRING (NULL);
 STATIC
 OC_SCHEMA
 mUefiQuirksSchema[] = {
+  OC_SCHEMA_BOOLEAN_IN ("DeduplicateBootOrder",   OC_GLOBAL_CONFIG, Uefi.Quirks.DeduplicateBootOrder),
   OC_SCHEMA_INTEGER_IN ("ExitBootServicesDelay",  OC_GLOBAL_CONFIG, Uefi.Quirks.ExitBootServicesDelay),
   OC_SCHEMA_BOOLEAN_IN ("IgnoreInvalidFlexRatio", OC_GLOBAL_CONFIG, Uefi.Quirks.IgnoreInvalidFlexRatio),
   OC_SCHEMA_BOOLEAN_IN ("ReleaseUsbOwnership",    OC_GLOBAL_CONFIG, Uefi.Quirks.ReleaseUsbOwnership),
-  OC_SCHEMA_BOOLEAN_IN ("RequestBootVarFallback", OC_GLOBAL_CONFIG, Uefi.Quirks.RequestBootVarFallback),
   OC_SCHEMA_BOOLEAN_IN ("RequestBootVarRouting",  OC_GLOBAL_CONFIG, Uefi.Quirks.RequestBootVarRouting),
+  OC_SCHEMA_INTEGER_IN ("TscSyncTimeout",         OC_GLOBAL_CONFIG, Uefi.Quirks.TscSyncTimeout),
   OC_SCHEMA_BOOLEAN_IN ("UnblockFsConnect",       OC_GLOBAL_CONFIG, Uefi.Quirks.UnblockFsConnect)
 };
 
@@ -549,9 +649,12 @@ mUefiProtocolOverridesSchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("AppleBootPolicy",         OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleBootPolicy),
   OC_SCHEMA_BOOLEAN_IN ("AppleDebugLog",           OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleDebugLog),
   OC_SCHEMA_BOOLEAN_IN ("AppleEvent",              OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleEvent),
+  OC_SCHEMA_BOOLEAN_IN ("AppleFramebufferInfo",    OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleFramebufferInfo),
   OC_SCHEMA_BOOLEAN_IN ("AppleImageConversion",    OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleImageConversion),
+  OC_SCHEMA_BOOLEAN_IN ("AppleImg4Verification",   OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleImg4Verification),
   OC_SCHEMA_BOOLEAN_IN ("AppleKeyMap",             OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleKeyMap),
   OC_SCHEMA_BOOLEAN_IN ("AppleRtcRam",             OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleRtcRam),
+  OC_SCHEMA_BOOLEAN_IN ("AppleSecureBoot",         OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleSecureBoot),
   OC_SCHEMA_BOOLEAN_IN ("AppleSmcIo",              OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleSmcIo),
   OC_SCHEMA_BOOLEAN_IN ("AppleUserInterfaceTheme", OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.AppleUserInterfaceTheme),
   OC_SCHEMA_BOOLEAN_IN ("DataHub",                 OC_GLOBAL_CONFIG, Uefi.ProtocolOverrides.DataHub),
@@ -566,6 +669,7 @@ STATIC
 OC_SCHEMA
 mUefiApfsSchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("EnableJumpstart",      OC_GLOBAL_CONFIG, Uefi.Apfs.EnableJumpstart),
+  OC_SCHEMA_BOOLEAN_IN ("GlobalConnect",        OC_GLOBAL_CONFIG, Uefi.Apfs.GlobalConnect),
   OC_SCHEMA_BOOLEAN_IN ("HideVerbose",          OC_GLOBAL_CONFIG, Uefi.Apfs.HideVerbose),
   OC_SCHEMA_BOOLEAN_IN ("JumpstartHotPlug",     OC_GLOBAL_CONFIG, Uefi.Apfs.JumpstartHotPlug),
   OC_SCHEMA_INTEGER_IN ("MinDate",              OC_GLOBAL_CONFIG, Uefi.Apfs.MinDate),
@@ -603,8 +707,8 @@ OC_SCHEMA
 mUefiOutputSchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("ClearScreenOnModeSwitch",OC_GLOBAL_CONFIG, Uefi.Output.ClearScreenOnModeSwitch),
   OC_SCHEMA_STRING_IN  ("ConsoleMode",            OC_GLOBAL_CONFIG, Uefi.Output.ConsoleMode),
-  OC_SCHEMA_STRING_IN  ("DirectGopCacheMode",     OC_GLOBAL_CONFIG, Uefi.Output.DirectGopCacheMode),
   OC_SCHEMA_BOOLEAN_IN ("DirectGopRendering",     OC_GLOBAL_CONFIG, Uefi.Output.DirectGopRendering),
+  OC_SCHEMA_BOOLEAN_IN ("ForceResolution",        OC_GLOBAL_CONFIG, Uefi.Output.ForceResolution),
   OC_SCHEMA_BOOLEAN_IN ("IgnoreTextInGraphics",   OC_GLOBAL_CONFIG, Uefi.Output.IgnoreTextInGraphics),
   OC_SCHEMA_BOOLEAN_IN ("ProvideConsoleGop",      OC_GLOBAL_CONFIG, Uefi.Output.ProvideConsoleGop),
   OC_SCHEMA_BOOLEAN_IN ("ReconnectOnResChange",   OC_GLOBAL_CONFIG, Uefi.Output.ReconnectOnResChange),
@@ -612,6 +716,7 @@ mUefiOutputSchema[] = {
   OC_SCHEMA_STRING_IN  ("Resolution",             OC_GLOBAL_CONFIG, Uefi.Output.Resolution),
   OC_SCHEMA_BOOLEAN_IN ("SanitiseClearScreen",    OC_GLOBAL_CONFIG, Uefi.Output.SanitiseClearScreen),
   OC_SCHEMA_STRING_IN  ("TextRenderer",           OC_GLOBAL_CONFIG, Uefi.Output.TextRenderer),
+  OC_SCHEMA_BOOLEAN_IN ("UgaPassThrough",         OC_GLOBAL_CONFIG, Uefi.Output.UgaPassThrough),
 };
 
 STATIC
@@ -621,6 +726,7 @@ mUefiReservedMemoryEntrySchema[] = {
   OC_SCHEMA_STRING_IN    ("Comment", OC_UEFI_RSVD_ENTRY, Comment),
   OC_SCHEMA_BOOLEAN_IN   ("Enabled", OC_UEFI_RSVD_ENTRY, Enabled),
   OC_SCHEMA_INTEGER_IN   ("Size",    OC_UEFI_RSVD_ENTRY, Size),
+  OC_SCHEMA_STRING_IN    ("Type",    OC_UEFI_RSVD_ENTRY, Type),
 };
 
 STATIC

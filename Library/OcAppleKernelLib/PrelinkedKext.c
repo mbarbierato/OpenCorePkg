@@ -20,6 +20,7 @@
 #include <Library/MemoryAllocationLib.h>
 #include <Library/OcAppleKernelLib.h>
 #include <Library/OcMachoLib.h>
+#include <Library/OcStringLib.h>
 #include <Library/OcXmlLib.h>
 
 #include "PrelinkedInternal.h"
@@ -41,21 +42,29 @@ InternalCreatePrelinkedKext (
   IN CONST CHAR8            *Identifier OPTIONAL
   )
 {
-  PRELINKED_KEXT  *NewKext;
-  UINT32          FieldIndex;
-  UINT32          FieldCount;
-  CONST CHAR8     *KextPlistKey;
-  XML_NODE        *KextPlistValue;
-  CONST CHAR8     *KextIdentifier;
-  XML_NODE        *BundleLibraries;
-  XML_NODE        *BundleLibraries64;
-  CONST CHAR8     *CompatibleVersion;
-  UINT64          VirtualBase;
-  UINT64          VirtualKmod;
-  UINT64          SourceBase;
-  UINT64          SourceSize;
-  UINT64          SourceEnd;
-  BOOLEAN         Found;
+  PRELINKED_KEXT           *NewKext;
+  UINT32                   FieldIndex;
+  UINT32                   FieldCount;
+  CONST CHAR8              *KextPlistKey;
+  XML_NODE                 *KextPlistValue;
+  CONST CHAR8              *KextIdentifier;
+  XML_NODE                 *BundleLibraries;
+  XML_NODE                 *BundleLibraries64;
+  CONST CHAR8              *CompatibleVersion;
+  UINT64                   VirtualBase;
+  UINT64                   VirtualKmod;
+  UINT64                   SourceBase;
+  UINT64                   SourceSize;
+  UINT64                   CalculatedSourceSize;
+  UINT64                   SourceEnd;
+  MACH_SEGMENT_COMMAND_ANY *BaseSegment;
+  UINT64                   KxldState;
+  UINT64                   KxldOffset;
+  UINT32                   KxldStateSize;
+  UINT32                   ContainerOffset;
+  BOOLEAN                  Found;
+  BOOLEAN                  HasExe;
+  BOOLEAN                  IsKpi;
 
   KextIdentifier    = NULL;
   BundleLibraries   = NULL;
@@ -65,6 +74,8 @@ InternalCreatePrelinkedKext (
   VirtualKmod       = 0;
   SourceBase        = 0;
   SourceSize        = 0;
+  KxldState         = 0;
+  KxldStateSize     = 0;
 
   Found       = Identifier == NULL;
 
@@ -117,10 +128,27 @@ InternalCreatePrelinkedKext (
       if (!PlistIntegerValue (KextPlistValue, &SourceSize, sizeof (SourceSize), TRUE)) {
         break;
       }
+    } else if (Prelinked != NULL && KxldState == 0 && AsciiStrCmp (KextPlistKey, PRELINK_INFO_LINK_STATE_ADDR_KEY) == 0) {
+      if (!PlistIntegerValue (KextPlistValue, &KxldState, sizeof (KxldState), TRUE)) {
+        break;
+      }
+    } else if (Prelinked != NULL && KxldStateSize == 0 && AsciiStrCmp (KextPlistKey, PRELINK_INFO_LINK_STATE_SIZE_KEY) == 0) {
+      if (!PlistIntegerValue (KextPlistValue, &KxldStateSize, sizeof (KxldStateSize), TRUE)) {
+        break;
+      }
     }
 
-    if (KextIdentifier != NULL && BundleLibraries64 != NULL && CompatibleVersion != NULL
-      && (Prelinked == NULL || (Prelinked != NULL && VirtualBase != 0 && VirtualKmod != 0 && SourceBase != 0 && SourceSize != 0))) {
+    if (KextIdentifier != NULL
+      && BundleLibraries64 != NULL
+      && CompatibleVersion != NULL
+      && (Prelinked == NULL
+        || (Prelinked != NULL
+          && VirtualBase != 0
+          && VirtualKmod != 0
+          && SourceBase != 0
+          && SourceSize != 0
+          && KxldState != 0
+          && KxldStateSize != 0))) {
       break;
     }
   }
@@ -128,17 +156,53 @@ InternalCreatePrelinkedKext (
   //
   // BundleLibraries, CompatibleVersion, and KmodInfo are optional and thus not checked.
   //
-  if (!Found || KextIdentifier == NULL || SourceBase < VirtualBase
-    || (Prelinked != NULL && (VirtualBase == 0 || SourceBase == 0 || SourceSize == 0 || SourceSize > MAX_UINT32))) {
+  if (!Found || KextIdentifier == NULL || SourceBase < VirtualBase) {
     return NULL;
   }
 
+  //
+  // KPIs on 10.6.8 may not have executables, but for all other types they are required.
+  //
   if (Prelinked != NULL) {
-    SourceBase -= Prelinked->PrelinkedTextSegment->VirtualAddress;
-    if (OcOverflowAddU64 (SourceBase, Prelinked->PrelinkedTextSegment->FileOffset, &SourceBase) ||
-      OcOverflowAddU64 (SourceBase, SourceSize, &SourceEnd) ||
-      SourceEnd > Prelinked->PrelinkedSize) {
+    HasExe = VirtualBase != 0 && SourceBase != 0 && SourceSize != 0 && SourceSize <= MAX_UINT32;
+    IsKpi  = VirtualBase == 0 && SourceBase == 0 && SourceSize == 0
+      && KxldState != 0 && KxldStateSize != 0 && !Prelinked->IsKernelCollection;
+    if (!IsKpi && !HasExe) {
       return NULL;
+    }
+  }
+
+  if (Prelinked != NULL && Prelinked->IsKernelCollection) {
+    CalculatedSourceSize = KcGetKextSize (Prelinked, SourceBase);
+    if (CalculatedSourceSize < MAX_UINT32 && CalculatedSourceSize > SourceSize) {
+      DEBUG ((
+        DEBUG_INFO,
+        "OCAK: Patching invalid size %Lx with %Lx for %a\n",
+        SourceSize,
+        CalculatedSourceSize,
+        KextIdentifier
+        ));
+      SourceSize = CalculatedSourceSize;
+    }
+  }
+
+  if (Prelinked != NULL && HasExe) {
+    if (Prelinked->IsKernelCollection) {
+      BaseSegment = (MACH_SEGMENT_COMMAND_ANY *) Prelinked->RegionSegment;
+    } else {
+      BaseSegment = Prelinked->PrelinkedTextSegment;
+    }
+
+    SourceBase -= Prelinked->Is32Bit ? BaseSegment->Segment32.VirtualAddress : BaseSegment->Segment64.VirtualAddress;
+    if (OcOverflowAddU64 (SourceBase, Prelinked->Is32Bit ? BaseSegment->Segment32.FileOffset : BaseSegment->Segment64.FileOffset, &SourceBase)
+      || OcOverflowAddU64 (SourceBase, SourceSize, &SourceEnd)
+      || SourceEnd > Prelinked->PrelinkedSize) {
+      return NULL;
+    }
+
+    ContainerOffset = 0;
+    if (Prelinked->IsKernelCollection) {
+      ContainerOffset = (UINT32) SourceBase;
     }
   }
 
@@ -151,17 +215,44 @@ InternalCreatePrelinkedKext (
   }
 
   if (Prelinked != NULL
-    && !MachoInitializeContext (&NewKext->Context.MachContext, &Prelinked->Prelinked[SourceBase], (UINT32)SourceSize)) {
+    && HasExe
+    && !MachoInitializeContext (&NewKext->Context.MachContext, &Prelinked->Prelinked[SourceBase], (UINT32)SourceSize, ContainerOffset, Prelinked->Is32Bit)) {
     FreePool (NewKext);
     return NULL;
   }
 
-  NewKext->Signature            = PRELINKED_KEXT_SIGNATURE;
-  NewKext->Identifier           = KextIdentifier;
-  NewKext->BundleLibraries      = BundleLibraries;
-  NewKext->CompatibleVersion    = CompatibleVersion;
-  NewKext->Context.VirtualBase  = VirtualBase;
-  NewKext->Context.VirtualKmod  = VirtualKmod;
+  NewKext->Signature                  = PRELINKED_KEXT_SIGNATURE;
+  NewKext->Identifier                 = KextIdentifier;
+  NewKext->BundleLibraries            = BundleLibraries;
+  NewKext->CompatibleVersion          = CompatibleVersion;
+  NewKext->Context.VirtualBase        = VirtualBase;
+  NewKext->Context.VirtualKmod        = VirtualKmod;
+  NewKext->Context.IsKernelCollection = Prelinked != NULL ? Prelinked->IsKernelCollection : FALSE;
+  NewKext->Context.Is32Bit            = Prelinked != NULL ? Prelinked->Is32Bit : FALSE;
+
+  //
+  // Provide pointer to 10.6.8 KXLD state.
+  //
+  if (Prelinked != NULL
+    && KxldState != 0
+    && KxldStateSize != 0
+    && Prelinked->PrelinkedStateKextsAddress != 0
+    && Prelinked->PrelinkedStateKextsAddress <= KxldState
+    && Prelinked->PrelinkedStateKextsSize >= KxldStateSize) {
+    KxldOffset = KxldState - Prelinked->PrelinkedStateKextsAddress;
+    if (KxldOffset <= Prelinked->PrelinkedStateKextsSize - KxldStateSize) {
+      NewKext->Context.KxldState = (UINT8 *)Prelinked->PrelinkedStateKexts + KxldOffset;
+      NewKext->Context.KxldStateSize = KxldStateSize;
+    }
+  }
+
+  DEBUG ((
+    DEBUG_VERBOSE,
+    "OCAK: %a got KXLD %p %u\n",
+    NewKext->Identifier,
+    NewKext->Context.KxldState,
+    NewKext->Context.KxldStateSize
+    ));
 
   return NewKext;
 }
@@ -169,17 +260,36 @@ InternalCreatePrelinkedKext (
 STATIC
 VOID
 InternalScanCurrentPrelinkedKextLinkInfo (
-  IN OUT PRELINKED_KEXT  *Kext
+  IN OUT PRELINKED_KEXT     *Kext,
+  IN     PRELINKED_CONTEXT  *Context
   )
 {
-  if (Kext->LinkEditSegment == NULL) {
-    Kext->LinkEditSegment = MachoGetSegmentByName64 (
-      &Kext->Context.MachContext,
-      "__LINKEDIT"
-      );
+  //
+  // Prefer KXLD state when available.
+  //
+  if (Kext->Context.KxldState != NULL) {
+    return;
   }
 
-  if (Kext->SymbolTable == NULL) {
+  if (Kext->LinkEditSegment == NULL && Kext->NumberOfSymbols == 0) {
+    if (AsciiStrCmp (Kext->Identifier, PRELINK_KERNEL_IDENTIFIER) == 0) {
+      Kext->LinkEditSegment = Context->LinkEditSegment;
+    } else {
+      Kext->LinkEditSegment = MachoGetSegmentByName (
+        &Kext->Context.MachContext,
+        "__LINKEDIT"
+        );
+    }    
+    DEBUG ((
+      DEBUG_VERBOSE,
+      "OCAK: Requesting __LINKEDIT for %a - %p at %p\n",
+      Kext->Identifier,
+      Kext->LinkEditSegment,
+      (UINT8 *) MachoGetMachHeader (&Kext->Context.MachContext) - Context->Prelinked
+      ));
+  }
+
+  if (Kext->SymbolTable == NULL && Kext->NumberOfSymbols == 0) {
     Kext->NumberOfSymbols = MachoGetSymbolTable (
                    &Kext->Context.MachContext,
                    &Kext->SymbolTable,
@@ -191,6 +301,12 @@ InternalScanCurrentPrelinkedKextLinkInfo (
                    NULL,
                    NULL
                    );
+    DEBUG ((
+      DEBUG_VERBOSE,
+      "OCAK: Requesting SymbolTable for %a - %u\n",
+      Kext->Identifier,
+      Kext->NumberOfSymbols
+      ));
   }
 }
 
@@ -201,7 +317,7 @@ InternalScanBuildLinkedSymbolTable (
   IN     PRELINKED_CONTEXT  *Context
   )
 {
-  CONST MACH_HEADER_64  *MachHeader;
+  CONST MACH_HEADER_ANY *MachHeader;
   BOOLEAN               ResolveSymbols;
   PRELINKED_KEXT_SYMBOL *SymbolTable;
   PRELINKED_KEXT_SYMBOL *WalkerBottom;
@@ -209,8 +325,9 @@ InternalScanBuildLinkedSymbolTable (
   UINT32                NumCxxSymbols;
   UINT32                NumDiscardedSyms;
   UINT32                Index;
-  CONST MACH_NLIST_64   *Symbol;
-  MACH_NLIST_64         SymbolScratch;
+  CONST MACH_NLIST_ANY  *Symbol;
+  UINT8                 SymbolType;
+  MACH_NLIST_ANY        SymbolScratch;
   CONST PRELINKED_KEXT_SYMBOL *ResolvedSymbol;
   CONST CHAR8           *Name;
   BOOLEAN               Result;
@@ -224,12 +341,12 @@ InternalScanBuildLinkedSymbolTable (
     return EFI_OUT_OF_RESOURCES;
   }
 
-  MachHeader = MachoGetMachHeader64 (&Kext->Context.MachContext);
+  MachHeader = MachoGetMachHeader (&Kext->Context.MachContext);
   ASSERT (MachHeader != NULL);
   //
   // KPIs declare undefined and indirect symbols even in prelinkedkernel.
   //
-  ResolveSymbols = ((MachHeader->Flags & MACH_HEADER_FLAG_NO_UNDEFINED_REFERENCES) == 0);
+  ResolveSymbols = (((Context->Is32Bit ? MachHeader->Header32.Flags : MachHeader->Header64.Flags) & MACH_HEADER_FLAG_NO_UNDEFINED_REFERENCES) == 0);
   NumDiscardedSyms = 0;
 
   WalkerBottom = &SymbolTable[0];
@@ -238,35 +355,41 @@ InternalScanBuildLinkedSymbolTable (
   NumCxxSymbols = 0;
 
   for (Index = 0; Index < Kext->NumberOfSymbols; ++Index) {
-    Symbol = &Kext->SymbolTable[Index];
-    if ((Symbol->Type & MACH_N_TYPE_STAB) != 0) {
+    if (Context->Is32Bit) {
+      Symbol = (MACH_NLIST_ANY *)&(&Kext->SymbolTable->Symbol32)[Index];
+    } else {
+      Symbol = (MACH_NLIST_ANY *)&(&Kext->SymbolTable->Symbol64)[Index];
+    }
+    SymbolType = Context->Is32Bit ? Symbol->Symbol32.Type : Symbol->Symbol64.Type;
+    if ((SymbolType & MACH_N_TYPE_STAB) != 0) {
       ++NumDiscardedSyms;
       continue;
     }
 
-    Name   = MachoGetSymbolName64 (&Kext->Context.MachContext, Symbol);
+    //
+    // Undefined symbols will be resolved via the KPI's dependencies and
+    // hence do not need to be included (again).
+    //
+    if ((SymbolType & MACH_N_TYPE_TYPE) == MACH_N_TYPE_UNDF) {
+      ++NumDiscardedSyms;
+      continue;
+    }
+
+    Name   = MachoGetSymbolName (&Kext->Context.MachContext, Symbol);
     Result = MachoSymbolNameIsCxx (Name);
 
     if (ResolveSymbols) {
       //
-      // Undefined symbols will be resolved via the KPI's dependencies and
-      // hence do not need to be included (again).
-      //
-      if ((Symbol->Type & MACH_N_TYPE_TYPE) == MACH_N_TYPE_UNDF) {
-        ++NumDiscardedSyms;
-        continue;
-      }
-      //
       // Resolve indirect symbols via the KPI's dependencies (kernel).
       //
-      if ((Symbol->Type & MACH_N_TYPE_TYPE) == MACH_N_TYPE_INDR) {
-        Name = MachoGetIndirectSymbolName64 (&Kext->Context.MachContext, Symbol);
+      if ((SymbolType & MACH_N_TYPE_TYPE) == MACH_N_TYPE_INDR) {
+        Name = MachoGetIndirectSymbolName (&Kext->Context.MachContext, Symbol);
         if (Name == NULL) {
           FreePool (SymbolTable);
           return EFI_LOAD_ERROR;
         }
 
-        CopyMem (&SymbolScratch, Symbol, sizeof (SymbolScratch));
+        CopyMem (&SymbolScratch, Symbol, Context->Is32Bit ? sizeof (SymbolScratch.Symbol32) : sizeof (SymbolScratch.Symbol64));
         ResolvedSymbol = InternalOcGetSymbolName (
                            Context,
                            Kext,
@@ -277,19 +400,25 @@ InternalScanBuildLinkedSymbolTable (
           FreePool (SymbolTable);
           return EFI_NOT_FOUND;
         }
-        SymbolScratch.Value = ResolvedSymbol->Value;
+        if (Context->Is32Bit) {
+          SymbolScratch.Symbol32.Value = (UINT32) ResolvedSymbol->Value;
+        } else {
+          SymbolScratch.Symbol64.Value = ResolvedSymbol->Value;
+        }
         Symbol = &SymbolScratch;
       }
     }
 
     if (!Result) {
-      WalkerBottom->Value  = Symbol->Value;
-      WalkerBottom->Name   = Kext->StringTable + Symbol->UnifiedName.StringIndex;
+      WalkerBottom->Value  = Context->Is32Bit ? Symbol->Symbol32.Value : Symbol->Symbol64.Value;
+      WalkerBottom->Name   = Kext->StringTable + (Context->Is32Bit ?
+        Symbol->Symbol32.UnifiedName.StringIndex : Symbol->Symbol64.UnifiedName.StringIndex);
       WalkerBottom->Length = (UINT32)AsciiStrLen (WalkerBottom->Name);
       ++WalkerBottom;
     } else {
-      WalkerTop->Value  = Symbol->Value;
-      WalkerTop->Name   = Kext->StringTable + Symbol->UnifiedName.StringIndex;
+      WalkerTop->Value  = Context->Is32Bit ? Symbol->Symbol32.Value : Symbol->Symbol64.Value;
+      WalkerTop->Name   = Kext->StringTable + (Context->Is32Bit ?
+        Symbol->Symbol32.UnifiedName.StringIndex : Symbol->Symbol64.UnifiedName.StringIndex);
       WalkerTop->Length = (UINT32)AsciiStrLen (WalkerTop->Name);
       --WalkerTop;
 
@@ -330,10 +459,9 @@ InternalScanBuildLinkedVtables (
   UINT32                           NumEntriesTemp;
   UINT32                           Index;
   UINT32                           VtableMaxSize;
-  CONST UINT64                     *VtableData;
+  UINT32                           ResultingSize;
+  CONST VOID                       *VtableData;
   PRELINKED_VTABLE                 *LinkedVtables;
-
-  VOID                             *Tmp;
 
   if (Kext->LinkedVtables != NULL) {
     return EFI_SUCCESS;
@@ -342,7 +470,7 @@ InternalScanBuildLinkedVtables (
   VtableLookups = Context->LinkBuffer;
   MaxSize       = Context->LinkBufferSize;
 
-  Result = InternalPrepareCreateVtablesPrelinked64 (
+  Result = InternalPrepareCreateVtablesPrelinked (
              Kext,
              MaxSize,
              &NumVtables,
@@ -360,17 +488,17 @@ InternalScanBuildLinkedVtables (
     //       need to abort anyway when the value is out of its bounds, we can
     //       just locate it by address in the first place.
     //
-    Tmp = MachoGetFilePointerByAddress64 (
+    VtableData = MachoGetFilePointerByAddress (
             &Kext->Context.MachContext,
             VtableLookups[Index].Vtable.Value,
             &VtableMaxSize
             );
-    if (Tmp == NULL || !OC_TYPE_ALIGNED (UINT64, Tmp)) {
+    if (VtableData == NULL || (Context->Is32Bit ? !OC_TYPE_ALIGNED (UINT32, VtableData) : !OC_TYPE_ALIGNED (UINT64, VtableData))) {
       return EFI_UNSUPPORTED;
     }
-    VtableData = (UINT64 *)Tmp;
 
-    Result = InternalGetVtableEntries64 (
+    Result = InternalGetVtableEntries (
+               Context->Is32Bit,
                VtableData,
                VtableMaxSize,
                &NumEntriesTemp
@@ -381,18 +509,22 @@ InternalScanBuildLinkedVtables (
 
     VtableLookups[Index].Vtable.Data = VtableData;
 
-    NumEntries += NumEntriesTemp;
+    if (OcOverflowAddU32 (NumEntries, NumEntriesTemp, &NumEntries)) {
+      return EFI_OUT_OF_RESOURCES;
+    }
   }
 
-  LinkedVtables = AllocatePool (
-                    (NumVtables * sizeof (*LinkedVtables))
-                      + (NumEntries * sizeof (*LinkedVtables->Entries))
-                    );
+  if (OcOverflowMulU32 (NumVtables, sizeof (*LinkedVtables), &ResultingSize)
+    || OcOverflowMulAddU32 (NumEntries, sizeof (*LinkedVtables->Entries), ResultingSize, &ResultingSize)) {
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  LinkedVtables = AllocatePool (ResultingSize);
   if (LinkedVtables == NULL) {
     return EFI_OUT_OF_RESOURCES;
   }
 
-  InternalCreateVtablesPrelinked64 (
+  InternalCreateVtablesPrelinked (
              Context,
              Kext,
              NumVtables,
@@ -417,10 +549,11 @@ InternalGetLinkBufferSize (
   // LinkBuffer must be able to hold all symbols and for KEXTs to be prelinked
   // also the __LINKEDIT segment (however not both simultaneously/separately).
   //
-  Size = Kext->NumberOfSymbols * sizeof (MACH_NLIST_64);
+  Size = Kext->NumberOfSymbols * (Kext->Context.Is32Bit ? sizeof (MACH_NLIST) : sizeof (MACH_NLIST_64));
   
   if (Kext->LinkEditSegment != NULL) {
-    Size = MAX ((UINT32) Kext->LinkEditSegment->FileSize, Size);
+    Size = MAX ((UINT32) (Kext->Context.Is32Bit ?
+      Kext->LinkEditSegment->Segment32.FileSize : Kext->LinkEditSegment->Segment64.FileSize), Size);
   }
 
   return Size;
@@ -478,7 +611,7 @@ InternalInsertPrelinkedKextDependency (
   EFI_STATUS  Status;
 
   if (DependencyIndex >= ARRAY_SIZE (Kext->Dependencies)) {
-    DEBUG ((DEBUG_INFO, "Kext %a has more than %u or more dependencies!", Kext->Identifier, DependencyIndex));
+    DEBUG ((DEBUG_INFO, "OCAK: Kext %a has more than %u or more dependencies!", Kext->Identifier, DependencyIndex));
     return EFI_OUT_OF_RESOURCES;
   }
 
@@ -583,9 +716,16 @@ InternalCachedPrelinkedKernel (
   IN OUT PRELINKED_CONTEXT  *Prelinked
   )
 {
-  LIST_ENTRY               *Kext;
-  PRELINKED_KEXT           *NewKext;
-  MACH_SEGMENT_COMMAND_64  *Segment;
+  LIST_ENTRY                *Kext;
+  PRELINKED_KEXT            *NewKext;
+  MACH_SEGMENT_COMMAND_ANY  *Segment;
+
+  UINT64                    VirtualAddress;
+  UINT64                    FileOffset;
+  UINT64                    KernelSize;
+  UINT64                    KextsSize;
+  UINT64                    KernelOffset;
+  UINT64                    KextsOffset;
 
   //
   // First entry is prelinked kernel.
@@ -603,26 +743,109 @@ InternalCachedPrelinkedKernel (
   ASSERT (Prelinked->Prelinked != NULL);
   ASSERT (Prelinked->PrelinkedSize > 0);
 
-  if (!MachoInitializeContext (&NewKext->Context.MachContext, &Prelinked->Prelinked[0], Prelinked->PrelinkedSize)) {
-    FreePool (NewKext);
-    return NULL;
-  }
+  CopyMem (
+    &NewKext->Context.MachContext,
+    &Prelinked->PrelinkedMachContext,
+    sizeof (NewKext->Context.MachContext)
+    );
 
-  Segment = MachoGetSegmentByName64 (
+  Segment = MachoGetSegmentByName (
     &NewKext->Context.MachContext,
     "__TEXT"
     );
-  if (Segment == NULL || Segment->VirtualAddress < Segment->FileOffset) {
+  VirtualAddress = Prelinked->Is32Bit ? Segment->Segment32.VirtualAddress : Segment->Segment64.VirtualAddress;
+  FileOffset     = Prelinked->Is32Bit ? Segment->Segment32.FileOffset : Segment->Segment64.FileOffset;
+
+  if (Segment == NULL || VirtualAddress < FileOffset) {
     FreePool (NewKext);
     return NULL;
   }
 
-  NewKext->Signature            = PRELINKED_KEXT_SIGNATURE;
-  NewKext->Identifier           = PRELINK_KERNEL_IDENTIFIER;
-  NewKext->BundleLibraries      = NULL;
-  NewKext->CompatibleVersion    = "0";
-  NewKext->Context.VirtualBase  = Segment->VirtualAddress - Segment->FileOffset;
-  NewKext->Context.VirtualKmod  = 0;
+  NewKext->Signature                  = PRELINKED_KEXT_SIGNATURE;
+  NewKext->Identifier                 = PRELINK_KERNEL_IDENTIFIER;
+  NewKext->BundleLibraries            = NULL;
+  NewKext->CompatibleVersion          = "0";
+  NewKext->Context.Is32Bit            = Prelinked->Is32Bit;
+  NewKext->Context.VirtualBase        = VirtualAddress - FileOffset;
+  NewKext->Context.VirtualKmod        = 0;
+  NewKext->Context.IsKernelCollection = Prelinked->IsKernelCollection;
+
+  if (!Prelinked->IsKernelCollection) {
+    //
+    // Find optional __PRELINK_STATE segment, present in 10.6.8
+    //
+    Prelinked->PrelinkedStateSegment = MachoGetSegmentByName (
+      &Prelinked->PrelinkedMachContext,
+      PRELINK_STATE_SEGMENT
+      );
+
+    if (Prelinked->PrelinkedStateSegment != NULL) {
+      Prelinked->PrelinkedStateSectionKernel = MachoGetSectionByName (
+        &Prelinked->PrelinkedMachContext,
+        Prelinked->PrelinkedStateSegment,
+        PRELINK_STATE_SECTION_KERNEL
+        );
+      Prelinked->PrelinkedStateSectionKexts = MachoGetSectionByName (
+        &Prelinked->PrelinkedMachContext,
+        Prelinked->PrelinkedStateSegment,
+        PRELINK_STATE_SECTION_KEXTS
+        );
+
+      KernelSize = Prelinked->Is32Bit ?
+        Prelinked->PrelinkedStateSectionKernel->Section32.Size :
+        Prelinked->PrelinkedStateSectionKernel->Section64.Size;
+      KextsSize = Prelinked->Is32Bit ?
+        Prelinked->PrelinkedStateSectionKexts->Section32.Size :
+        Prelinked->PrelinkedStateSectionKexts->Section64.Size;
+      KernelOffset = Prelinked->Is32Bit ?
+        Prelinked->PrelinkedStateSectionKernel->Section32.Offset :
+        Prelinked->PrelinkedStateSectionKernel->Section64.Offset;
+      KextsOffset = Prelinked->Is32Bit ?
+        Prelinked->PrelinkedStateSectionKexts->Section32.Offset :
+        Prelinked->PrelinkedStateSectionKexts->Section64.Offset;
+
+      if (Prelinked->PrelinkedStateSectionKernel != NULL
+        && Prelinked->PrelinkedStateSectionKexts != NULL
+        && KernelSize > 0
+        && KextsSize > 0) {
+        Prelinked->PrelinkedStateKernelSize = (UINT32) KernelSize;
+        Prelinked->PrelinkedStateKextsSize = (UINT32) KextsSize;
+        Prelinked->PrelinkedStateKernel = AllocateCopyPool (
+          Prelinked->PrelinkedStateKernelSize,
+          &Prelinked->Prelinked[KernelOffset]
+          );
+        Prelinked->PrelinkedStateKexts = AllocateCopyPool (
+          Prelinked->PrelinkedStateKextsSize,
+          &Prelinked->Prelinked[KextsOffset]
+          );
+      }
+
+      if (Prelinked->PrelinkedStateKernel != NULL
+        && Prelinked->PrelinkedStateKexts != NULL) {
+        Prelinked->PrelinkedStateKextsAddress = Prelinked->Is32Bit ?
+          Prelinked->PrelinkedStateSectionKexts->Section32.Address :
+          Prelinked->PrelinkedStateSectionKexts->Section64.Address;
+        NewKext->Context.KxldState = Prelinked->PrelinkedStateKernel;
+        NewKext->Context.KxldStateSize = Prelinked->PrelinkedStateKernelSize;
+      } else {
+        DEBUG ((
+          DEBUG_INFO,
+          "OCAK: Ignoring unused PK state __kernel %p __kexts %p\n",
+          Prelinked->PrelinkedStateSectionKernel,
+          Prelinked->PrelinkedStateSectionKexts
+          ));
+        if (Prelinked->PrelinkedStateKernel != NULL) {
+          FreePool (Prelinked->PrelinkedStateKernel);
+        }
+        if (Prelinked->PrelinkedStateKexts != NULL) {
+          FreePool (Prelinked->PrelinkedStateKexts);
+        }
+        Prelinked->PrelinkedStateSectionKernel = NULL;
+        Prelinked->PrelinkedStateSectionKexts = NULL;
+        Prelinked->PrelinkedStateSegment = NULL;
+      }
+    }
+  }
 
   InsertTailList (&Prelinked->PrelinkedKexts, &NewKext->Link);
 
@@ -678,7 +901,7 @@ InternalScanPrelinkedKext (
   // __LINKEDIT may validly not be present, as seen for 10.7.5's
   // com.apple.kpi.unsupported.
   //
-  InternalScanCurrentPrelinkedKextLinkInfo (Kext);
+  InternalScanCurrentPrelinkedKextLinkInfo (Kext, Context);
   //
   // Find the biggest LinkBuffer size down the first dependency tree walk to
   // possibly save a few re-allocations.
@@ -716,12 +939,23 @@ InternalScanPrelinkedKext (
       }
 
       //
+      // In 11.0 KPIs just like plist-only kexts are not present in memory and their
+      // _PrelinkExecutableLoadAddr / _PrelinkExecutableSourceAddr values equal to MAX_INT64.
+      // Skip them early to improve performance.
+      //
+      if (Context->IsKernelCollection
+        && AsciiStrnCmp (DependencyId, "com.apple.kpi.", L_STR_LEN ("com.apple.kpi.")) == 0) {
+        DEBUG ((DEBUG_VERBOSE, "OCAK: Ignoring KPI %a for kext %a in KC/state mode\n", DependencyId, Kext->Identifier));
+        continue;
+      }
+
+      //
       // We still need to add KPI dependencies, as they may have indirect symbols,
       // which are not present in kernel (e.g. _IOLockLock).
       //
       DependencyKext = InternalCachedPrelinkedKext (Context, DependencyId);
       if (DependencyKext == NULL) {
-        DEBUG ((DEBUG_INFO, "Dependency %a was not found for kext %a\n", DependencyId, Kext->Identifier));
+        DEBUG ((DEBUG_INFO, "OCAK: Dependency %a was not found for kext %a\n", DependencyId, Kext->Identifier));
 
         DependencyKext = InternalGetQuirkDependencyKext (DependencyId, Context);
         if (DependencyKext == NULL) {
@@ -761,14 +995,38 @@ InternalScanPrelinkedKext (
   // Collect data to enable linking against this KEXT.
   //
   if (Dependency) {
-    Status = InternalScanBuildLinkedSymbolTable (Kext, Context);
-    if (EFI_ERROR (Status)) {
-      return Status;
-    }
+    if (Kext->Context.KxldState != NULL) {
+      //
+      // Use KXLD state as is for 10.6.8 kernel.
+      //
+      Status = InternalKxldStateBuildLinkedSymbolTable (
+        Kext,
+        Context
+        );
+      if (EFI_ERROR (Status)) {
+        return Status;
+      }
 
-    Status = InternalScanBuildLinkedVtables (Kext, Context);
-    if (EFI_ERROR (Status)) {
-      return Status;
+      Status = InternalKxldStateBuildLinkedVtables (
+        Kext,
+        Context
+        );
+      if (EFI_ERROR (Status)) {
+        return Status;
+      }
+    } else {
+      //
+      // Use normal LINKEDIT building for newer kernels and all kexts.
+      //
+      Status = InternalScanBuildLinkedSymbolTable (Kext, Context);
+      if (EFI_ERROR (Status)) {
+        return Status;
+      }
+
+      Status = InternalScanBuildLinkedVtables (Kext, Context);
+      if (EFI_ERROR (Status)) {
+        return Status;
+      }
     }
   }
 
@@ -795,7 +1053,8 @@ InternalLinkPrelinkedKext (
   IN OUT OC_MACHO_CONTEXT   *Executable,
   IN     XML_NODE           *PlistRoot,
   IN     UINT64             LoadAddress,
-  IN     UINT64             KmodAddress
+  IN     UINT64             KmodAddress,
+  IN     UINT64             FileOffset
   )
 {
   EFI_STATUS      Status;
@@ -850,7 +1109,7 @@ InternalLinkPrelinkedKext (
   Kext->Context.VirtualBase = LoadAddress;
   Kext->Context.VirtualKmod = KmodAddress;
 
-  Status = InternalPrelinkKext64 (Context, Kext, LoadAddress);
+  Status = InternalPrelinkKext (Context, Kext, LoadAddress, FileOffset);
 
   if (EFI_ERROR (Status)) {
     InternalFreePrelinkedKext (Kext);

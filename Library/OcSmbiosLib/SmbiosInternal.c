@@ -111,7 +111,7 @@ SmbiosOverrideString (
   //
   if (Length > SMBIOS_STRING_MAX_LENGTH) {
     Length = SMBIOS_STRING_MAX_LENGTH;
-    DEBUG ((DEBUG_INFO, "SMBIOS truncating '%a' to %u bytes\n", Override, Length));
+    DEBUG ((DEBUG_INFO, "OCMB: SMBIOS truncating '%a' to %u bytes\n", Override, Length));
   }
 
   while (Length > 0 && Override[Length - 1] == ' ') {
@@ -123,7 +123,7 @@ SmbiosOverrideString (
   }
 
   if (EFI_ERROR (SmbiosExtendTable (Table, Length + 1))) {
-    DEBUG ((DEBUG_WARN, "SMBIOS failed to write '%a' with %u byte extension\n", Override, Length + 1));
+    DEBUG ((DEBUG_WARN, "OCSMB: SMBIOS failed to write '%a' with %u byte extension\n", Override, Length + 1));
     return 0;
   }
 
@@ -158,6 +158,7 @@ SmbiosAssignStructHandle (
     }
   } else if (Type == SMBIOS_TYPE_PORT_CONNECTOR_INFORMATION
           || Type == SMBIOS_TYPE_SYSTEM_SLOTS
+          || Type == SMBIOS_TYPE_PHYSICAL_MEMORY_ARRAY
           || Type == SMBIOS_TYPE_MEMORY_ARRAY_MAPPED_ADDRESS
           || Type == SMBIOS_TYPE_MEMORY_DEVICE
           || Type == SMBIOS_TYPE_MEMORY_DEVICE_MAPPED_ADDRESS) {
@@ -207,9 +208,6 @@ SmbiosAssignStructHandle (
       break;
     case SMBIOS_TYPE_SYSTEM_EVENT_LOG:
       Table->CurrentPtr.Standard.Hdr->Handle = OcSmbiosSystemEventLogHandle;
-      break;
-    case SMBIOS_TYPE_PHYSICAL_MEMORY_ARRAY:
-      Table->CurrentPtr.Standard.Hdr->Handle = OcSmbiosPhysicalMemoryArrayHandle;
       break;
     case SMBIOS_TYPE_32BIT_MEMORY_ERROR_INFORMATION:
       Table->CurrentPtr.Standard.Hdr->Handle = OcSmbios32BitMemoryErrorInformationHandle;
@@ -328,7 +326,7 @@ SmbiosInitialiseStruct (
 
   Status = SmbiosExtendTable (Table, MinLength);
   if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_WARN, "Failed to extend SMBIOS for table %u - %r", Type, Status));
+    DEBUG ((DEBUG_WARN, "OCSMB: Failed to extend SMBIOS for table %u - %r", Type, Status));
     return Status;
   }
 

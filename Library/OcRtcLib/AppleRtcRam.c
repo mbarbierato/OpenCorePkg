@@ -16,7 +16,7 @@
 
 **/
 
-#include <Guid/OcVariables.h>
+#include <Guid/OcVariable.h>
 #include <Protocol/AppleRtcRam.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
@@ -246,7 +246,7 @@ AppleRtcRamReset (
   UINTN       Index;
   UINT8       Buffer[APPLE_RTC_TOTAL_SIZE];
 
-  ZeroMem (Buffer, sizeof (APPLE_RTC_TOTAL_SIZE));
+  ZeroMem (Buffer, sizeof (Buffer));
 
   for (Index = APPLE_RTC_CHECKSUM_START; Index < APPLE_RTC_CORE_SIZE; ++Index) {
     Status = SyncRtcWaitForReady ();
@@ -295,10 +295,10 @@ OcAppleRtcRamInstallProtocol (
   UINTN                   Index;
   UINTN                   RtcBlacklistSize;
 
-  DEBUG ((DEBUG_VERBOSE, "OcAppleRtcRamInstallProtocol\n"));
+  DEBUG ((DEBUG_VERBOSE, "OCRTC: OcAppleRtcRamInstallProtocol\n"));
 
   if (Reinstall) {
-    Status = UninstallAllProtocolInstances (&gAppleRtcRamProtocolGuid);
+    Status = OcUninstallAllProtocolInstances (&gAppleRtcRamProtocolGuid);
     if (EFI_ERROR (Status)) {
       DEBUG ((DEBUG_ERROR, "OCRTC: Uninstall failed: %r\n", Status));
       return NULL;

@@ -33,13 +33,18 @@
   KextPatcher.c
   Link.c
   CommonPatches.c
+  KernelCollection.c
+  KernelVersion.c
+  KxldState.c
   PrelinkedContext.c
   PrelinkedInternal.h
   PrelinkedKext.c
   Vtables.c
+  CachelessContext.c
+  MkextContext.c
+  CpuidPatches.c
 
 [Packages]
-  EfiPkg/EfiPkg.dec
   MdePkg/MdePkg.dec
   OpenCorePkg/OpenCorePkg.dec
   UefiCpuPkg/UefiCpuPkg.dec

@@ -40,7 +40,6 @@
 [Packages]
   OpenCorePkg/OpenCorePkg.dec
   MdePkg/MdePkg.dec
-  EfiPkg/EfiPkg.dec
 
 [Guids]
   gAppleApfsPartitionTypeGuid                     ## GUID CONSUMES
@@ -51,13 +50,17 @@
   gApfsEfiBootRecordInfoProtocolGuid              ## PROTOCOL PRODUCES
   gApfsUnsupportedBdsProtocolGuid                 ## PROTOCOL CONSUMES
   gEfiLoadedImageProtocolGuid                     ## PROTOCOL CONSUMES
+  gEfiDevicePathProtocolGuid                      ## PROTOCOL CONSUMES
+  gEfiPartitionInfoProtocolGuid                   ## PROTOCOL SOMETIMES_CONSUMES
 
 [LibraryClasses]
   BaseLib
   BaseMemoryLib
   DebugLib
+  DevicePathLib
   OcAppleImageVerificationLib
   OcConsoleLib
+  OcDriverConnectionLib
   OcGuardLib
   OcMiscLib
   MemoryAllocationLib
